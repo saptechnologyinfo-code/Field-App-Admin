@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Admin — Field Service Job Tracker</title>
+<style>
+  :root{
+    --primary:#1f6feb; --primary-dark:#164b9e; --bg:#f4f6f9; --card:#ffffff;
+    --text:#1c2530; --muted:#6b7684; --border:#e1e6ec;
+    --success:#1e8e5a; --success-bg:#e6f6ee; --warn:#b8860b; --warn-bg:#fff4e0; --danger:#c62828;
+    --input-bg:#fafbfc; --hover-bg:#fafbfc; --danger-bg:#fdeaea; --grey-bg:#eef1f5;
+    --skeleton-base:#e8ecf1; --skeleton-highlight:#f6f8fa;
+    --shadow:0 1px 3px rgba(0,0,0,.04);
+  }
+  :root[data-theme="dark"]{
+    --primary:#4c8dff; --primary-dark:#3a72d9; --bg:#10151b; --card:#1a212a;
+    --text:#e7ebef; --muted:#8b95a1; --border:#2a323d;
+    --success:#3ddc97; --success-bg:#123425; --warn:#e0b34d; --warn-bg:#3a2f10; --danger:#ff6b6b;
+    --input-bg:#12181f; --hover-bg:#1f2731; --danger-bg:#3a1414; --grey-bg:#232b34;
+    --skeleton-base:#232b34; --skeleton-highlight:#2e3844;
+    --shadow:0 1px 3px rgba(0,0,0,.3);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);transition:background .2s ease, color .2s ease;}
+  .card, input, select, button.btn, button.btn-secondary, button.btn-danger, .tab-btn, .modal-box{
+    transition:background .2s ease, border-color .2s ease, color .2s ease;
+  }
+  @keyframes shimmer{ 0%{background-position:-400px 0;} 100%{background-position:400px 0;} }
+  .skeleton{
+    display:inline-block; border-radius:6px; color:transparent !important;
+    background:linear-gradient(90deg, var(--skeleton-base) 25%, var(--skeleton-highlight) 37%, var(--skeleton-base) 63%);
+    background-size:400px 100%; animation:shimmer 1.4s ease-in-out infinite;
+  }
+  @keyframes fadeIn{ from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);} }
+  .fade-in{ animation:fadeIn .25s ease both; }
+  .theme-toggle{
+    position:fixed; top:16px; right:16px; width:44px; height:44px; border-radius:50%;
+    background:var(--card); border:1px solid var(--border); box-shadow:var(--shadow);
+    font-size:1.15rem; display:flex; align-items:center; justify-content:center;
+    cursor:pointer; z-index:500; padding:0; margin:0;
+  }
+  .wrap{max-width:1100px;margin:0 auto;padding:24px 20px 60px;}
+  h1{font-size:1.4rem;margin:0;}
+  .top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;}
+  .logout{font-size:.85rem;color:var(--primary);background:none;border:none;cursor:pointer;padding:0;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+  .tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;}
+  .tab-btn{padding:9px 16px;border-radius:20px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:.9rem;font-weight:600;color:var(--muted);}
+  .tab-btn.active{background:var(--primary);color:#fff;border-color:var(--primary);}
+  .hidden{display:none !important;}
+  label{display:block;font-size:.82rem;color:var(--muted);margin:10px 0 6px;}
+  input,select{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:.95rem;background:var(--input-bg);color:var(--text);}
+  input:focus,select:focus{outline:2px solid var(--primary);border-color:var(--primary);}
+  button.btn{padding:10px 16px;border:none;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;background:var(--primary);color:#fff;}
+  button.btn:hover{background:var(--primary-dark);}
+  button.btn-danger{background:var(--card);color:var(--danger);border:1px solid var(--danger);}
+  button.btn-danger:hover{background:var(--danger-bg);}
+  button.btn-secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:end;}
+  .row > div{flex:1;min-width:160px;}
+  table{width:100%;border-collapse:collapse;font-size:.88rem;}
+  th{text-align:left;padding:10px 8px;color:var(--muted);font-weight:600;border-bottom:2px solid var(--border);white-space:nowrap;}
+  td{padding:10px 8px;border-bottom:1px solid var(--border);white-space:nowrap;}
+  tr:hover td{background:var(--hover-bg);}
+  .pill{display:inline-block;font-size:.75rem;font-weight:700;padding:3px 10px;border-radius:20px;}
+  .pill-started{background:var(--warn-bg);color:var(--warn);}
+  .pill-reached{background:var(--success-bg);color:var(--success);}
+  .pill-completed{background:var(--grey-bg);color:var(--muted);}
+  .pill-cancelled{background:var(--danger-bg);color:var(--danger);}
+  .error{color:var(--danger);font-size:.85rem;margin-top:8px;min-height:1em;}
+  .empty{color:var(--muted);padding:20px 0;text-align:center;}
+  .table-scroll{overflow-x:auto;}
+  .form-inline{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:6px;}
+  .form-inline > div{flex:1;min-width:140px;}
+  .actions-cell button{margin-right:6px;font-size:.78rem;padding:5px 10px;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px;}
+  .modal-box{background:var(--card);border-radius:14px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;padding:24px;}
+  .modal-close{float:right;background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--muted);width:auto;padding:0;}
+  .modal-thumb{width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid var(--border);margin:4px;}
+  .modal-section{margin-top:18px;}
+  .modal-section h3{font-size:.9rem;margin:0 0 8px;color:var(--muted);}
+  .modal-bill-row, .modal-fund-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:.88rem;}
+  .balance-pos{color:var(--success);} .balance-neg{color:var(--danger);}
+  .cash-txn-row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:.88rem;}
+  .cash-txn-row .txn-note{color:var(--muted);font-size:.8rem;}
+  .cash-txn-amt.fund{color:var(--success);} .cash-txn-amt.expense{color:var(--danger);}
+  .cash-summary{display:flex;gap:18px;flex-wrap:wrap;margin:10px 0 4px;}
+  .cash-summary .stat{background:var(--grey-bg);border-radius:10px;padding:8px 14px;font-size:.85rem;}
+  .cash-summary .stat b{display:block;font-size:1.05rem;margin-top:2px;}
+  .config-banner{background:#fff4e0;border:1px solid #f2d59b;color:#7a5b00;font-size:.85rem;padding:10px 14px;border-radius:10px;margin-bottom:16px;}
+</style>
+</head>
+<body>
+<button id="themeToggle" class="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+<div class="wrap">
+
+  <div id="configBanner" class="config-banner hidden">
+    ⚠️ Set <code>WEB_APP_URL</code> at the top of the script section in this file to your deployed
+    Apps Script Web App URL (ends in <code>/exec</code>) before using this page.
+  </div>
+
+  <div id="loginView">
+    <h1>Admin Login</h1>
+    <div class="card" style="max-width:380px;">
+      <label>Username</label>
+      <input id="loginUsername" autocomplete="username" />
+      <label>Password</label>
+      <input id="loginPassword" type="password" autocomplete="current-password" />
+      <button class="btn" id="loginBtn" style="width:100%;margin-top:14px;">Log in</button>
+      <div class="error" id="loginError"></div>
+    </div>
+  </div>
+
+  <div id="appView" class="hidden">
+    <div class="top-bar">
+      <h1>Field Service — Admin</h1>
+      <div>
+        <span id="adminName" style="margin-right:16px;color:var(--muted);"></span>
+        <button class="logout" id="logoutBtn">Log out</button>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="jobs">Jobs</button>
+      <button class="tab-btn" data-tab="branches">Branches</button>
+      <button class="tab-btn" data-tab="sites">Sites</button>
+      <button class="tab-btn" data-tab="technicians">Technicians</button>
+    </div>
+
+    <div id="tab-jobs" class="tab-panel">
+      <div class="card">
+        <div class="row">
+          <div><label>Filter by branch</label><select id="filterBranch"><option value="">All branches</option></select></div>
+          <div><label>Filter by site</label><select id="filterSite"><option value="">All sites</option></select></div>
+          <div><label>Filter by technician</label><select id="filterTechnician"><option value="">All technicians</option></select></div>
+          <div><label>Filter by status</label>
+            <select id="filterStatus">
+              <option value="">All</option>
+              <option value="started">Started</option>
+              <option value="reached">Reached</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+          <div style="max-width:140px;"><button class="btn btn-secondary" id="refreshJobsBtn" style="width:100%;">Refresh</button></div>
+        </div>
+      </div>
+      <div class="card table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Job #</th><th>Branch</th><th>Site</th><th>Technician</th><th>Status</th>
+              <th>Started</th><th>Reached</th><th>GPS dist.</th><th>Actual dist.</th>
+              <th>Bills</th><th>Funds</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="jobsTableBody"></tbody>
+        </table>
+        <div id="jobsEmpty" class="empty hidden">No jobs match this filter.</div>
+      </div>
+    </div>
+
+    <div id="tab-branches" class="tab-panel hidden">
+      <div class="card">
+        <h2 style="font-size:1rem;margin-top:0;">Add branch</h2>
+        <div class="form-inline">
+          <div><label>Code (e.g. GMP)</label><input id="newBranchCode" /></div>
+          <div><label>Name (e.g. Gampaha Branch)</label><input id="newBranchName" /></div>
+          <div style="max-width:140px;"><button class="btn" id="addBranchBtn" style="width:100%;">Add</button></div>
+        </div>
+        <div class="error" id="branchError"></div>
+      </div>
+      <div class="card table-scroll">
+        <table><thead><tr><th>Code</th><th>Name</th><th>Active</th><th></th></tr></thead><tbody id="branchesTableBody"></tbody></table>
+      </div>
+    </div>
+
+    <div id="tab-sites" class="tab-panel hidden">
+      <div class="card">
+        <h2 style="font-size:1rem;margin-top:0;">Add site</h2>
+        <div class="form-inline">
+          <div><label>Code (e.g. SAP14)</label><input id="newSiteCode" /></div>
+          <div><label>Name (e.g. SAP 14)</label><input id="newSiteName" /></div>
+          <div><label>Address (optional)</label><input id="newSiteAddress" /></div>
+          <div style="max-width:140px;"><button class="btn" id="addSiteBtn" style="width:100%;">Add</button></div>
+        </div>
+        <div class="error" id="siteError"></div>
+      </div>
+      <div class="card table-scroll">
+        <table><thead><tr><th>Code</th><th>Name</th><th>Address</th><th>Active</th><th>Funds given</th><th>Expenses</th><th>Balance</th><th></th></tr></thead><tbody id="sitesTableBody"></tbody></table>
+      </div>
+    </div>
+
+    <div id="tab-technicians" class="tab-panel hidden">
+      <div class="card">
+        <h2 style="font-size:1rem;margin-top:0;">Add technician / admin login</h2>
+        <div class="form-inline">
+          <div><label>Name</label><input id="newTechName" /></div>
+          <div><label>Username</label><input id="newTechUsername" /></div>
+          <div><label>Password</label><input id="newTechPassword" type="text" /></div>
+          <div><label>Role</label><select id="newTechRole"><option value="technician">Technician</option><option value="admin">Admin</option></select></div>
+          <div style="max-width:140px;"><button class="btn" id="addTechBtn" style="width:100%;">Add</button></div>
+        </div>
+        <div class="error" id="techError"></div>
+      </div>
+      <div class="card table-scroll">
+        <table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Active</th><th></th></tr></thead><tbody id="techTableBody"></tbody></table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="jobModal">
+  <div class="modal-box">
+    <button class="modal-close" id="closeJobModal">&times;</button>
+    <h2 id="modalJobNumber" style="margin-top:0;">Job</h2>
+    <div class="sub" id="modalJobMeta" style="color:var(--muted);font-size:.9rem;"></div>
+
+    <div class="modal-section"><h3>Photos</h3><div id="modalPhotos"></div></div>
+    <div class="modal-section"><h3>Bills / purchases</h3><div id="modalBills"></div></div>
+    <div class="modal-section">
+      <h3>Fund given</h3>
+      <div id="modalFunds"></div>
+      <div class="form-inline" style="margin-top:10px;">
+        <div><label>Amount (Rs.)</label><input id="newFundAmount" type="number" step="0.01" min="0" /></div>
+        <div><label>Note (optional)</label><input id="newFundNote" /></div>
+        <div style="max-width:120px;"><button class="btn" id="addFundBtn" style="width:100%;">Add</button></div>
+      </div>
+      <div class="error" id="fundError"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="siteCashModal">
+  <div class="modal-box">
+    <button class="modal-close" id="closeSiteCashModal">&times;</button>
+    <h2 id="cashModalSiteName" style="margin-top:0;">Site</h2>
+    <div class="cash-summary">
+      <div class="stat">Funds given<b id="cashModalTotalFunds">Rs. 0.00</b></div>
+      <div class="stat">Expenses<b id="cashModalTotalExpenses">Rs. 0.00</b></div>
+      <div class="stat">Balance<b id="cashModalBalance">Rs. 0.00</b></div>
+    </div>
+    <div class="modal-section">
+      <h3>Transactions (all jobs at this site)</h3>
+      <div id="cashModalTxns"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+ * CONFIG — paste your deployed Apps Script Web App URL here.
+ * Deploy -> New deployment -> Web app -> copy the URL ending in /exec.
+ * ===================================================================== */
+const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz1QlBqThpiSHjnQbIIfoN52_pOgEO8EYkXzt3e9xe9WqHhT1wQ-Yi51k02Xn4ypWsk/exec"; // e.g. "https://script.google.com/macros/s/AKfycbxxxxxxxx/exec"
+
+/* ---------- gsRun: calls the Apps Script Web App backend over HTTP ----------
+ * Uses Content-Type: text/plain to avoid a CORS preflight request, since
+ * Apps Script web apps don't handle OPTIONS requests. The server (doPost
+ * in Code.gs) still parses the body as JSON regardless of this header. */
+/* ---------- Dark mode ---------- */
+const THEME_KEY = 'jobtracker-theme';
+function applyTheme(theme){
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('themeToggle');
+  if(btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+  localStorage.setItem(THEME_KEY, theme);
+}
+(function initTheme(){
+  const saved = localStorage.getItem(THEME_KEY);
+  const theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  applyTheme(theme);
+})();
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const current = document.documentElement.getAttribute('data-theme');
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+});
+
+/* ---------- Skeleton loading rows ---------- */
+function skeletonTableRows(colCount, rowCount){
+  let rows = '';
+  for(let r = 0; r < rowCount; r++){
+    let cells = '';
+    for(let c = 0; c < colCount; c++){
+      const w = 55 + Math.floor(Math.random() * 35);
+      cells += `<td><div class="skeleton" style="height:14px;width:${w}%;">&nbsp;</div></td>`;
+    }
+    rows += `<tr>${cells}</tr>`;
+  }
+  return rows;
+}
+function skeletonLines(count){
+  let out = '';
+  for(let i = 0; i < count; i++){
+    const w = 50 + Math.floor(Math.random() * 40);
+    out += `<div class="skeleton" style="height:14px;width:${w}%;margin:8px 0;">&nbsp;</div>`;
+  }
+  return out;
+}
+function skeletonThumbs(count){
+  let out = '';
+  for(let i = 0; i < count; i++){
+    out += `<div class="skeleton" style="width:80px;height:80px;border-radius:8px;display:inline-block;margin:4px;">&nbsp;</div>`;
+  }
+  return out;
+}
+
+function gsRun(fnName, ...args){
+  return fetch(WEB_APP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ fn: fnName, args: args })
+  })
+  .then(res => {
+    if(!res.ok) throw new Error('Network error: ' + res.status);
+    return res.json();
+  })
+  .then(data => {
+    if(!data.ok) throw new Error(data.error || 'Request failed.');
+    return data.result;
+  });
+}
+// Bill receipts are stored as bare Drive file IDs (see note in loadModalPhotos).
+// Open a blank tab immediately (so popup blockers don't catch it), then
+// fill it in once the image data arrives.
+async function openReceipt(fileId){
+  const win = window.open('', '_blank');
+  try{
+    const dataUrl = await gsRun('getFileDataUrl', fileId);
+    if(win) win.document.write(`<title>Receipt</title><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="${dataUrl}" style="max-width:100%;max-height:100vh;" /></body>`);
+  } catch(e){
+    if(win) win.document.write('Could not load receipt.');
+  }
+}
+
+if(WEB_APP_URL.indexOf('PASTE_YOUR_WEB_APP_URL_HERE') !== -1){
+  document.getElementById('configBanner').classList.remove('hidden');
+}
+
+const loginView = document.getElementById('loginView');
+const appView = document.getElementById('appView');
+const loginBtn = document.getElementById('loginBtn');
+const loginError = document.getElementById('loginError');
+const logoutBtn = document.getElementById('logoutBtn');
+const adminNameEl = document.getElementById('adminName');
+
+let admin = null;
+let lastJobsData = [];
+
+function getSession(){ const raw = sessionStorage.getItem('admin'); return raw ? JSON.parse(raw) : null; }
+function setSession(a){ sessionStorage.setItem('admin', JSON.stringify(a)); }
+function clearSession(){ sessionStorage.removeItem('admin'); }
+function fmtTime(ts){ if(!ts) return '—'; return new Date(ts).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}); }
+
+loginBtn.addEventListener('click', async () => {
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  loginError.textContent = '';
+  if(!username || !password){ loginError.textContent = 'Enter username and password.'; return; }
+  loginBtn.disabled = true;
+  try{
+    const result = await gsRun('loginUser', username, password);
+    loginBtn.disabled = false;
+    if(!result){ loginError.textContent = 'Invalid username or password.'; return; }
+    if(result.role !== 'admin'){ loginError.textContent = 'This login is not an admin account.'; return; }
+    admin = result;
+    setSession(admin);
+    enterApp();
+  } catch(e){
+    loginBtn.disabled = false;
+    loginError.textContent = e.message || 'Login failed.';
+  }
+});
+
+logoutBtn.addEventListener('click', () => {
+  clearSession(); admin = null;
+  appView.classList.add('hidden'); loginView.classList.remove('hidden');
+});
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.remove('hidden');
+  });
+});
+
+/* ---------- Jobs ---------- */
+async function loadFilterOptions(){
+  const [sites, techs, branches] = await Promise.all([gsRun('listSites'), gsRun('listTechnicians'), gsRun('listBranches')]);
+
+  const siteSel = document.getElementById('filterSite');
+  siteSel.innerHTML = '<option value="">All sites</option>' + sites.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+
+  const techSel = document.getElementById('filterTechnician');
+  techSel.innerHTML = '<option value="">All technicians</option>' + techs.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+
+  const branchSel = document.getElementById('filterBranch');
+  branchSel.innerHTML = '<option value="">All branches</option>' + branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+}
+
+async function loadJobs(){
+  const tbody = document.getElementById('jobsTableBody');
+  const empty = document.getElementById('jobsEmpty');
+  empty.classList.add('hidden');
+  tbody.innerHTML = skeletonTableRows(12, 5);
+  let data;
+  try{ data = await gsRun('listAllJobs'); } catch(e){ tbody.innerHTML=''; empty.classList.remove('hidden'); empty.textContent='Error loading jobs.'; return; }
+  lastJobsData = data || [];
+
+  const branchFilter = document.getElementById('filterBranch').value;
+  const siteFilter = document.getElementById('filterSite').value;
+  const techFilter = document.getElementById('filterTechnician').value;
+  const statusFilter = document.getElementById('filterStatus').value;
+
+  let rows = lastJobsData;
+  if(branchFilter) rows = rows.filter(r => r.branch_id === branchFilter);
+  if(siteFilter) rows = rows.filter(r => r.site_id === siteFilter);
+  if(techFilter) rows = rows.filter(r => r.technician_id === techFilter);
+  if(statusFilter) rows = rows.filter(r => r.status === statusFilter);
+
+  if(rows.length === 0){ tbody.innerHTML=''; empty.classList.remove('hidden'); empty.textContent='No jobs match this filter.'; return; }
+  empty.classList.add('hidden');
+
+  tbody.innerHTML = rows.map(r => `
+    <tr class="fade-in">
+      <td><b>${r.job_number}</b></td>
+      <td>${r.branch_name || '—'}</td>
+      <td>${r.site_name}</td>
+      <td>${r.technician_name}</td>
+      <td><span class="pill pill-${r.status}">${r.status.toUpperCase()}</span></td>
+      <td>${fmtTime(r.start_time)}</td>
+      <td>${fmtTime(r.reach_time)}</td>
+      <td>${r.gps_distance_km != null ? r.gps_distance_km.toFixed(2) + ' km' : '—'}</td>
+      <td>
+        <input type="number" step="0.1" min="0" value="${r.actual_distance_km != null ? r.actual_distance_km : ''}"
+          style="width:90px;display:inline-block;padding:6px;" id="actual-${r.id}" />
+        <button class="btn btn-secondary" style="padding:5px 8px;font-size:.78rem;" onclick="saveActualDistance('${r.id}')">Save</button>
+      </td>
+      <td>Rs. ${Number(r.total_bills || 0).toFixed(2)}</td>
+      <td>Rs. ${Number(r.total_funds || 0).toFixed(2)}</td>
+      <td><button class="btn btn-secondary" onclick="openJobModalById('${r.id}')">View</button></td>
+    </tr>
+  `).join('');
+}
+
+window.saveActualDistance = async (jobId) => {
+  const input = document.getElementById('actual-' + jobId);
+  const val = input.value.trim();
+  if(val === ''){ alert('Enter a distance in km first.'); return; }
+  const km = parseFloat(val);
+  if(isNaN(km) || km < 0){ alert('Enter a valid number.'); return; }
+  try{ await gsRun('setActualDistance', jobId, km); await loadJobs(); }
+  catch(e){ alert('Could not save: ' + e.message); }
+};
+
+['filterBranch','filterSite','filterTechnician','filterStatus'].forEach(id =>
+  document.getElementById(id).addEventListener('change', loadJobs)
+);
+document.getElementById('refreshJobsBtn').addEventListener('click', async () => {
+  await loadFilterOptions(); await loadJobs();
+});
+
+/* ---------- Branches ---------- */
+async function loadBranchesTable(){
+  const tbody = document.getElementById('branchesTableBody');
+  tbody.innerHTML = skeletonTableRows(4, 3);
+  const data = await gsRun('listBranches');
+  document.getElementById('branchesTableBody').innerHTML = data.map(b => `
+    <tr class="fade-in">
+      <td>${b.code}</td><td>${b.name}</td><td>${b.active ? 'Yes' : 'No'}</td>
+      <td class="actions-cell">
+        <button class="btn btn-secondary" onclick="toggleBranchActive('${b.id}', ${!b.active})">${b.active ? 'Disable' : 'Enable'}</button>
+        <button class="btn btn-danger" onclick="deleteBranch('${b.id}')">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+document.getElementById('addBranchBtn').addEventListener('click', async () => {
+  const code = document.getElementById('newBranchCode').value.trim();
+  const name = document.getElementById('newBranchName').value.trim();
+  const errEl = document.getElementById('branchError');
+  errEl.textContent = '';
+  if(!code || !name){ errEl.textContent = 'Code and name are required.'; return; }
+  try{
+    await gsRun('createBranch', code, name);
+    document.getElementById('newBranchCode').value = '';
+    document.getElementById('newBranchName').value = '';
+    await loadBranchesTable(); await loadFilterOptions();
+  } catch(e){ errEl.textContent = e.message; }
+});
+window.toggleBranchActive = async (id, newState) => { await gsRun('updateBranchActive', id, newState); await loadBranchesTable(); await loadFilterOptions(); };
+window.deleteBranch = async (id) => {
+  if(!confirm('Delete this branch? Existing jobs referencing it will remain but this cannot be undone.')) return;
+  try{ await gsRun('deleteBranch', id); await loadBranchesTable(); await loadFilterOptions(); }
+  catch(e){ alert('Could not delete: ' + e.message); }
+};
+
+/* ---------- Sites ---------- */
+async function loadSitesTable(){
+  const tbody = document.getElementById('sitesTableBody');
+  tbody.innerHTML = skeletonTableRows(8, 3);
+  const [sites, financials] = await Promise.all([gsRun('listSites'), gsRun('listSiteFinancials')]);
+  window.siteFinancialsById = {};
+  financials.forEach(f => window.siteFinancialsById[f.id] = f);
+  document.getElementById('sitesTableBody').innerHTML = sites.map(s => {
+    const f = window.siteFinancialsById[s.id] || { total_funds: 0, total_expenses: 0, balance: 0 };
+    const balCls = f.balance < 0 ? 'balance-neg' : 'balance-pos';
+    return `
+    <tr class="fade-in">
+      <td>${s.code}</td><td>${s.name}</td><td>${s.address || '—'}</td><td>${s.active ? 'Yes' : 'No'}</td>
+      <td>Rs. ${f.total_funds.toFixed(2)}</td>
+      <td>Rs. ${f.total_expenses.toFixed(2)}</td>
+      <td class="${balCls}">Rs. ${f.balance.toFixed(2)}</td>
+      <td class="actions-cell">
+        <button class="btn btn-secondary" onclick="openSiteCashModal('${s.id}')">Cash</button>
+        <button class="btn btn-secondary" onclick="toggleSiteActive('${s.id}', ${!s.active})">${s.active ? 'Disable' : 'Enable'}</button>
+        <button class="btn btn-danger" onclick="deleteSite('${s.id}')">Delete</button>
+      </td>
+    </tr>
+  `;
+  }).join('');
+}
+window.openSiteCashModal = (siteId) => {
+  const f = window.siteFinancialsById && window.siteFinancialsById[siteId];
+  if(!f) return;
+  document.getElementById('cashModalSiteName').textContent = `${f.code} · ${f.name}`;
+  document.getElementById('cashModalTotalFunds').textContent = `Rs. ${f.total_funds.toFixed(2)}`;
+  document.getElementById('cashModalTotalExpenses').textContent = `Rs. ${f.total_expenses.toFixed(2)}`;
+  const balEl = document.getElementById('cashModalBalance');
+  balEl.textContent = `Rs. ${f.balance.toFixed(2)}`;
+  balEl.className = f.balance < 0 ? 'balance-neg' : 'balance-pos';
+  const txnsEl = document.getElementById('cashModalTxns');
+  txnsEl.innerHTML = f.transactions.length ? f.transactions.map(t => `
+    <div class="cash-txn-row">
+      <span>
+        ${t.type === 'fund' ? 'Fund given' : (t.note || 'Expense')}
+        <div class="txn-note">Job ${t.job_number || '—'} · ${fmtTime(t.date)}</div>
+      </span>
+      <span class="cash-txn-amt ${t.type}">${t.type === 'fund' ? '+' : '−'} Rs. ${t.amount.toFixed(2)}</span>
+    </div>
+  `).join('') : '<div class="sub fade-in">No transactions yet.</div>';
+  document.getElementById('siteCashModal').classList.remove('hidden');
+};
+document.getElementById('closeSiteCashModal').addEventListener('click', () => {
+  document.getElementById('siteCashModal').classList.add('hidden');
+});
+document.getElementById('addSiteBtn').addEventListener('click', async () => {
+  const code = document.getElementById('newSiteCode').value.trim();
+  const name = document.getElementById('newSiteName').value.trim();
+  const address = document.getElementById('newSiteAddress').value.trim();
+  const errEl = document.getElementById('siteError');
+  errEl.textContent = '';
+  if(!code || !name){ errEl.textContent = 'Code and name are required.'; return; }
+  try{
+    await gsRun('createSite', code, name, address || null);
+    document.getElementById('newSiteCode').value = '';
+    document.getElementById('newSiteName').value = '';
+    document.getElementById('newSiteAddress').value = '';
+    await loadSitesTable(); await loadFilterOptions();
+  } catch(e){ errEl.textContent = e.message; }
+});
+window.toggleSiteActive = async (id, newState) => { await gsRun('updateSiteActive', id, newState); await loadSitesTable(); await loadFilterOptions(); };
+window.deleteSite = async (id) => {
+  if(!confirm('Delete this site? Existing jobs referencing it will remain but this cannot be undone.')) return;
+  try{ await gsRun('deleteSite', id); await loadSitesTable(); await loadFilterOptions(); }
+  catch(e){ alert('Could not delete: ' + e.message); }
+};
+
+/* ---------- Technicians ---------- */
+async function loadTechTable(){
+  const tbody = document.getElementById('techTableBody');
+  tbody.innerHTML = skeletonTableRows(5, 3);
+  const data = await gsRun('listTechnicians');
+  document.getElementById('techTableBody').innerHTML = data.map(t => `
+    <tr class="fade-in">
+      <td>${t.name}</td><td>${t.username}</td><td>${t.role}</td><td>${t.active ? 'Yes' : 'No'}</td>
+      <td class="actions-cell">
+        <button class="btn btn-secondary" onclick="resetPassword('${t.id}')">Reset password</button>
+        <button class="btn btn-secondary" onclick="toggleTechActive('${t.id}', ${!t.active}, '${t.name.replace(/'/g,"\\'")}', '${t.username}', '${t.role}')">${t.active ? 'Disable' : 'Enable'}</button>
+        <button class="btn btn-danger" onclick="deleteTech('${t.id}')">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+document.getElementById('addTechBtn').addEventListener('click', async () => {
+  const name = document.getElementById('newTechName').value.trim();
+  const username = document.getElementById('newTechUsername').value.trim();
+  const password = document.getElementById('newTechPassword').value;
+  const role = document.getElementById('newTechRole').value;
+  const errEl = document.getElementById('techError');
+  errEl.textContent = '';
+  if(!name || !username || !password){ errEl.textContent = 'Name, username and password are required.'; return; }
+  try{
+    await gsRun('createTechnician', name, username, password, role);
+    document.getElementById('newTechName').value = '';
+    document.getElementById('newTechUsername').value = '';
+    document.getElementById('newTechPassword').value = '';
+    await loadTechTable(); await loadFilterOptions();
+  } catch(e){ errEl.textContent = e.message; }
+});
+window.resetPassword = async (id) => {
+  const pw = prompt('Enter a new password for this login:');
+  if(!pw) return;
+  try{ await gsRun('resetTechnicianPassword', id, pw); alert('Password updated.'); }
+  catch(e){ alert('Could not reset password: ' + e.message); }
+};
+window.toggleTechActive = async (id, newState, name, username, role) => {
+  try{ await gsRun('updateTechnician', id, name, username, role, newState); await loadTechTable(); await loadFilterOptions(); }
+  catch(e){ alert('Could not update: ' + e.message); }
+};
+window.deleteTech = async (id) => {
+  if(!confirm('Delete this login? This cannot be undone.')) return;
+  try{ await gsRun('deleteTechnician', id); await loadTechTable(); await loadFilterOptions(); }
+  catch(e){ alert('Could not delete: ' + e.message); }
+};
+
+/* ---------- Job details modal ---------- */
+const jobModal = document.getElementById('jobModal');
+let modalJobId = null;
+
+window.openJobModalById = async (jobId) => {
+  const job = lastJobsData.find(j => j.id === jobId);
+  if(!job) return;
+  modalJobId = job.id;
+  document.getElementById('modalJobNumber').textContent = job.job_number;
+  document.getElementById('modalJobMeta').textContent = `${job.branch_name || '—'} · ${job.site_name} · ${job.technician_name}`;
+  document.getElementById('modalPhotos').innerHTML = skeletonThumbs(3);
+  document.getElementById('modalBills').innerHTML = skeletonLines(2);
+  document.getElementById('modalFunds').innerHTML = skeletonLines(2);
+  jobModal.classList.remove('hidden');
+  await loadModalPhotos(); await loadModalBills(); await loadModalFunds();
+};
+document.getElementById('closeJobModal').addEventListener('click', () => { jobModal.classList.add('hidden'); modalJobId = null; });
+
+async function loadModalPhotos(){
+  const el = document.getElementById('modalPhotos');
+  try{
+    const photos = await gsRun('listJobPhotos', modalJobId);
+    if(!photos.length){ el.innerHTML = '<div class="sub fade-in">No photos uploaded.</div>'; return; }
+    // Photos are stored as bare Drive file IDs, not URLs — each one is
+    // fetched as a data: URI over the same JSON API as everything else,
+    // since Apps Script web apps can't serve a raw file link directly.
+    const dataUrls = await Promise.all(photos.map(p => gsRun('getFileDataUrl', p.url).catch(() => null)));
+    el.innerHTML = dataUrls.map(src => src ? `<img class="modal-thumb fade-in" src="${src}" alt="job photo" />` : '').join('');
+  } catch(e){ el.innerHTML = '<div class="sub">Could not load photos.</div>'; }
+}
+async function loadModalBills(){
+  const el = document.getElementById('modalBills');
+  try{
+    const bills = await gsRun('listJobBills', modalJobId);
+    el.innerHTML = bills.length ? bills.map(b => `
+      <div class="modal-bill-row fade-in">
+        <span>${b.description || 'Purchase'}</span>
+        <span>Rs. ${Number(b.amount).toFixed(2)} ${b.url ? `· <a href="#" onclick="openReceipt('${b.url}'); return false;">Receipt</a>` : ''}</span>
+      </div>
+    `).join('') : '<div class="sub fade-in">No bills added.</div>';
+  } catch(e){ el.innerHTML = '<div class="sub">Could not load bills.</div>'; }
+}
+async function loadModalFunds(){
+  const el = document.getElementById('modalFunds');
+  try{
+    const funds = await gsRun('listJobFunds', modalJobId);
+    el.innerHTML = funds.length ? funds.map(f => `
+      <div class="modal-fund-row fade-in"><span>${f.note || 'Fund given'}</span><span>Rs. ${Number(f.amount).toFixed(2)} · ${fmtTime(f.created_at)}</span></div>
+    `).join('') : '<div class="sub fade-in">No funds recorded.</div>';
+  } catch(e){ el.innerHTML = '<div class="sub">Could not load funds.</div>'; }
+}
+document.getElementById('addFundBtn').addEventListener('click', async () => {
+  const errEl = document.getElementById('fundError');
+  errEl.textContent = '';
+  const amountVal = document.getElementById('newFundAmount').value.trim();
+  if(amountVal === ''){ errEl.textContent = 'Enter an amount.'; return; }
+  const amount = parseFloat(amountVal);
+  if(isNaN(amount) || amount < 0){ errEl.textContent = 'Enter a valid amount.'; return; }
+  const note = document.getElementById('newFundNote').value.trim();
+  try{
+    await gsRun('addJobFund', modalJobId, amount, note || null);
+    document.getElementById('newFundAmount').value = '';
+    document.getElementById('newFundNote').value = '';
+    await loadModalFunds(); await loadJobs();
+  } catch(e){ errEl.textContent = e.message; }
+});
+
+/* ---------- Boot ---------- */
+async function enterApp(){
+  loginView.classList.add('hidden');
+  appView.classList.remove('hidden');
+  adminNameEl.textContent = admin.name;
+  await loadFilterOptions();
+  await loadJobs();
+  await loadBranchesTable();
+  await loadSitesTable();
+  await loadTechTable();
+}
+
+(function init(){
+  const existing = getSession();
+  if(existing){ admin = existing; enterApp(); }
+})();
+</script>
+</body>
+</html>
