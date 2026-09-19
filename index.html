@@ -68,6 +68,10 @@
   .pill-reached{background:var(--success-bg);color:var(--success);}
   .pill-completed{background:var(--grey-bg);color:var(--muted);}
   .pill-cancelled{background:var(--danger-bg);color:var(--danger);}
+  .pill-overdue{background:var(--danger-bg);color:var(--danger);margin-left:6px;}
+  .report-stat{background:var(--grey-bg);border-radius:10px;padding:10px 16px;font-size:.85rem;}
+  .report-stat b{display:block;font-size:1.2rem;margin-top:2px;}
+  .report-grid{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;}
   .error{color:var(--danger);font-size:.85rem;margin-top:8px;min-height:1em;}
   .empty{color:var(--muted);padding:20px 0;text-align:center;}
   .table-scroll{overflow-x:auto;}
@@ -126,6 +130,7 @@
       <button class="tab-btn" data-tab="branches">Branches</button>
       <button class="tab-btn" data-tab="sites">Sites</button>
       <button class="tab-btn" data-tab="technicians">Technicians</button>
+      <button class="tab-btn" data-tab="reports">Reports</button>
     </div>
 
     <div id="tab-jobs" class="tab-panel">
@@ -144,6 +149,7 @@
             </select>
           </div>
           <div style="max-width:140px;"><button class="btn btn-secondary" id="refreshJobsBtn" style="width:100%;">Refresh</button></div>
+          <div style="max-width:160px;"><button class="btn btn-secondary" id="exportJobsBtn" style="width:100%;">Export CSV</button></div>
         </div>
       </div>
       <div class="card table-scroll">
@@ -187,6 +193,9 @@
         </div>
         <div class="error" id="siteError"></div>
       </div>
+      <div class="card" style="display:flex;justify-content:flex-end;padding:12px 20px;">
+        <button class="btn btn-secondary" id="exportSitesBtn" style="width:auto;">Export site cash CSV</button>
+      </div>
       <div class="card table-scroll">
         <table><thead><tr><th>Code</th><th>Name</th><th>Address</th><th>Active</th><th>Funds given</th><th>Expenses</th><th>Balance</th><th></th></tr></thead><tbody id="sitesTableBody"></tbody></table>
       </div>
@@ -209,6 +218,18 @@
       </div>
     </div>
 
+    <div id="tab-reports" class="tab-panel hidden">
+      <div class="card">
+        <div class="row">
+          <div><label>From date</label><input id="reportFrom" type="date" /></div>
+          <div><label>To date</label><input id="reportTo" type="date" /></div>
+          <div style="max-width:140px;"><button class="btn" id="runReportBtn" style="width:100%;">Run report</button></div>
+        </div>
+        <div class="sub" style="color:var(--muted);font-size:.85rem;margin-top:6px;">Leave both blank to include all jobs on record.</div>
+      </div>
+      <div id="reportResults"></div>
+    </div>
+
   </div>
 </div>
 
@@ -217,6 +238,17 @@
     <button class="modal-close" id="closeJobModal">&times;</button>
     <h2 id="modalJobNumber" style="margin-top:0;">Job</h2>
     <div class="sub" id="modalJobMeta" style="color:var(--muted);font-size:.9rem;"></div>
+
+    <div class="modal-section">
+      <h3>Reassign</h3>
+      <div class="form-inline">
+        <div><label>Branch</label><select id="editBranchSelect"></select></div>
+        <div><label>Site</label><select id="editSiteSelect"></select></div>
+        <div><label>Technician</label><select id="editTechSelect"></select></div>
+        <div style="max-width:110px;"><button class="btn btn-secondary" id="saveReassignBtn" style="width:100%;">Save</button></div>
+      </div>
+      <div class="error" id="reassignError"></div>
+    </div>
 
     <div class="modal-section"><h3>Photos</h3><div id="modalPhotos"></div></div>
     <div class="modal-section"><h3>Bills / purchases</h3><div id="modalBills"></div></div>
@@ -230,6 +262,7 @@
       </div>
       <div class="error" id="fundError"></div>
     </div>
+    <div class="modal-section"><h3>History</h3><div id="modalHistory"></div></div>
   </div>
 </div>
 
@@ -385,6 +418,9 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.remove('hidden');
+    if(btn.dataset.tab === 'reports' && !document.getElementById('reportResults').innerHTML){
+      loadReport();
+    }
   });
 });
 
@@ -431,7 +467,7 @@ async function loadJobs(){
       <td>${r.branch_name || '—'}</td>
       <td>${r.site_name}</td>
       <td>${r.technician_name}</td>
-      <td><span class="pill pill-${r.status}">${r.status.toUpperCase()}</span></td>
+      <td><span class="pill pill-${r.status}">${r.status.toUpperCase()}</span>${r.overdue ? '<span class="pill pill-overdue">OVERDUE</span>' : ''}</td>
       <td>${fmtTime(r.start_time)}</td>
       <td>${fmtTime(r.reach_time)}</td>
       <td>${r.gps_distance_km != null ? r.gps_distance_km.toFixed(2) + ' km' : '—'}</td>
@@ -453,7 +489,7 @@ window.saveActualDistance = async (jobId) => {
   if(val === ''){ alert('Enter a distance in km first.'); return; }
   const km = parseFloat(val);
   if(isNaN(km) || km < 0){ alert('Enter a valid number.'); return; }
-  try{ await gsRun('setActualDistance', jobId, km); await loadJobs(); }
+  try{ await gsRun('setActualDistance', jobId, km, admin.id); await loadJobs(); }
   catch(e){ alert('Could not save: ' + e.message); }
 };
 
@@ -462,6 +498,33 @@ window.saveActualDistance = async (jobId) => {
 );
 document.getElementById('refreshJobsBtn').addEventListener('click', async () => {
   await loadFilterOptions(); await loadJobs();
+});
+
+/* ---------- CSV export (client-side — no extra backend round trip) ---------- */
+function downloadCsv(filename, rows){
+  const csv = rows.map(row => row.map(cell => {
+    const s = cell == null ? '' : String(cell);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+document.getElementById('exportJobsBtn').addEventListener('click', () => {
+  const header = ['Job #','Branch','Site','Technician','Status','Started','Reached','GPS km','Actual km','Bills (Rs)','Funds (Rs)','Overdue'];
+  const rows = lastJobsData.map(r => [r.job_number, r.branch_name, r.site_name, r.technician_name, r.status,
+    fmtTime(r.start_time), fmtTime(r.reach_time), r.gps_distance_km, r.actual_distance_km,
+    Number(r.total_bills || 0).toFixed(2), Number(r.total_funds || 0).toFixed(2), r.overdue ? 'Yes' : 'No']);
+  downloadCsv('jobs-export.csv', [header, ...rows]);
+});
+document.getElementById('exportSitesBtn').addEventListener('click', () => {
+  const header = ['Site code','Site name','Funds given (Rs)','Expenses (Rs)','Balance (Rs)'];
+  const rows = Object.values(window.siteFinancialsById || {}).map(f =>
+    [f.code, f.name, f.total_funds.toFixed(2), f.total_expenses.toFixed(2), f.balance.toFixed(2)]);
+  downloadCsv('site-cash-export.csv', [header, ...rows]);
 });
 
 /* ---------- Branches ---------- */
@@ -631,9 +694,46 @@ window.openJobModalById = async (jobId) => {
   document.getElementById('modalPhotos').innerHTML = skeletonThumbs(3);
   document.getElementById('modalBills').innerHTML = skeletonLines(2);
   document.getElementById('modalFunds').innerHTML = skeletonLines(2);
+  document.getElementById('modalHistory').innerHTML = skeletonLines(2);
+  document.getElementById('reassignError').textContent = '';
+  await populateReassignSelects(job);
   jobModal.classList.remove('hidden');
-  await loadModalPhotos(); await loadModalBills(); await loadModalFunds();
+  await loadModalPhotos(); await loadModalBills(); await loadModalFunds(); await loadModalHistory();
 };
+
+async function populateReassignSelects(job){
+  const [branches, sites, techs] = await Promise.all([gsRun('listBranches'), gsRun('listSites'), gsRun('listTechnicians')]);
+  const bSel = document.getElementById('editBranchSelect');
+  const sSel = document.getElementById('editSiteSelect');
+  const tSel = document.getElementById('editTechSelect');
+  bSel.innerHTML = branches.map(b => `<option value="${b.id}" ${b.id === job.branch_id ? 'selected' : ''}>${b.name}</option>`).join('');
+  sSel.innerHTML = sites.map(s => `<option value="${s.id}" ${s.id === job.site_id ? 'selected' : ''}>${s.name}</option>`).join('');
+  tSel.innerHTML = techs.map(t => `<option value="${t.id}" ${t.id === job.technician_id ? 'selected' : ''}>${t.name}</option>`).join('');
+}
+document.getElementById('saveReassignBtn').addEventListener('click', async () => {
+  const errEl = document.getElementById('reassignError');
+  errEl.textContent = '';
+  try{
+    await gsRun('editJob', modalJobId,
+      document.getElementById('editSiteSelect').value,
+      document.getElementById('editBranchSelect').value,
+      document.getElementById('editTechSelect').value,
+      admin.id);
+    await loadJobs();
+    const refreshed = lastJobsData.find(j => j.id === modalJobId);
+    if(refreshed) document.getElementById('modalJobMeta').textContent = `${refreshed.branch_name || '—'} · ${refreshed.site_name} · ${refreshed.technician_name}`;
+    await loadModalHistory();
+  } catch(e){ errEl.textContent = e.message || 'Could not save.'; }
+});
+async function loadModalHistory(){
+  const el = document.getElementById('modalHistory');
+  try{
+    const hist = await gsRun('listJobHistory', modalJobId);
+    el.innerHTML = hist.length ? hist.map(h => `
+      <div class="modal-fund-row fade-in"><span>${(h.actor_name || 'System')} — ${h.detail || h.action}</span><span>${fmtTime(h.created_at)}</span></div>
+    `).join('') : '<div class="sub fade-in">No history recorded.</div>';
+  } catch(e){ el.innerHTML = '<div class="sub">Could not load history.</div>'; }
+}
 document.getElementById('closeJobModal').addEventListener('click', () => { jobModal.classList.add('hidden'); modalJobId = null; });
 
 async function loadModalPhotos(){
@@ -684,6 +784,52 @@ document.getElementById('addFundBtn').addEventListener('click', async () => {
     await loadModalFunds(); await loadJobs();
   } catch(e){ errEl.textContent = e.message; }
 });
+
+/* ---------- Reports ---------- */
+document.getElementById('runReportBtn').addEventListener('click', loadReport);
+async function loadReport(){
+  const el = document.getElementById('reportResults');
+  el.innerHTML = skeletonLines(6);
+  const from = document.getElementById('reportFrom').value;
+  const to = document.getElementById('reportTo').value;
+  let r;
+  try{ r = await gsRun('getReportsData', from || null, to || null); }
+  catch(e){ el.innerHTML = '<div class="empty">Could not load report.</div>'; return; }
+
+  const statuses = ['started','reached','completed','cancelled'];
+  const statCards = `
+    <div class="report-grid fade-in">
+      <div class="report-stat">Total jobs<b>${r.total_jobs}</b></div>
+      <div class="report-stat">Overdue (still started, 3h+)<b>${r.overdue_count}</b></div>
+      <div class="report-stat">Total bills<b>Rs. ${r.total_bills.toFixed(2)}</b></div>
+      <div class="report-stat">Total funds given<b>Rs. ${r.total_funds.toFixed(2)}</b></div>
+      <div class="report-stat">Avg GPS distance<b>${r.avg_gps_km != null ? r.avg_gps_km.toFixed(2) + ' km' : '—'}</b></div>
+      <div class="report-stat">Avg actual distance<b>${r.avg_actual_km != null ? r.avg_actual_km.toFixed(2) + ' km' : '—'}</b></div>
+    </div>
+    <div class="report-grid fade-in">
+      ${statuses.map(s => `<div class="report-stat">${s.charAt(0).toUpperCase()+s.slice(1)}<b>${r.by_status[s] || 0}</b></div>`).join('')}
+    </div>`;
+
+  const branchRows = Object.keys(r.by_branch).map(name => {
+    const b = r.by_branch[name];
+    return `<tr><td>${name}</td><td>${b.jobs}</td><td>Rs. ${b.bills.toFixed(2)}</td><td>Rs. ${b.funds.toFixed(2)}</td></tr>`;
+  }).join('') || '<tr><td colspan="4" class="empty">No data.</td></tr>';
+
+  const techRows = Object.keys(r.by_technician).map(name => {
+    const t = r.by_technician[name];
+    return `<tr><td>${name}</td><td>${t.jobs}</td><td>${t.completed}</td><td>${t.cancelled}</td><td>Rs. ${t.bills.toFixed(2)}</td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty">No data.</td></tr>';
+
+  el.innerHTML = statCards + `
+    <div class="card table-scroll fade-in">
+      <h3 style="margin-top:0;font-size:.9rem;color:var(--muted);">By branch</h3>
+      <table><thead><tr><th>Branch</th><th>Jobs</th><th>Bills</th><th>Funds</th></tr></thead><tbody>${branchRows}</tbody></table>
+    </div>
+    <div class="card table-scroll fade-in">
+      <h3 style="margin-top:0;font-size:.9rem;color:var(--muted);">By technician</h3>
+      <table><thead><tr><th>Technician</th><th>Jobs</th><th>Completed</th><th>Cancelled</th><th>Bills</th></tr></thead><tbody>${techRows}</tbody></table>
+    </div>`;
+}
 
 /* ---------- Boot ---------- */
 async function enterApp(){
