@@ -94,15 +94,14 @@
   .cash-summary .stat b{display:block;font-size:1.05rem;margin-top:2px;}
   .config-banner{background:#fff4e0;border:1px solid #f2d59b;color:#7a5b00;font-size:.85rem;padding:10px 14px;border-radius:10px;margin-bottom:16px;}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <button id="themeToggle" class="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
 <div class="wrap">
 
   <div id="configBanner" class="config-banner hidden">
-    ⚠️ Set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> at the top of the script
-    section in this file to your Supabase project's values before using this page.
+    ⚠️ Set <code>EDGE_FUNCTION_URL</code> and <code>SUPABASE_ANON_KEY</code> at the top of the
+    script section in this file to your deployed values before using this page.
   </div>
 
   <div id="loginView">
@@ -285,100 +284,53 @@
 
 <script>
 /* =====================================================================
- * CONFIG — paste your Supabase project URL and anon (public) key here.
- * Project Settings -> API -> Project URL / anon public key.
+ * CONFIG — paste your deployed Supabase Edge Function URL and anon
+ * (public) key here.
+ * Edge Function URL: Project -> Edge Functions -> api -> copy the URL
+ * (ends in /functions/v1/api). Anon key: Project Settings -> API.
  * ===================================================================== */
-const SUPABASE_URL = "https://iutyadazxxrrdxeorqsk.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1dHlhZGF6eHhycmR4ZW9ycXNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk3OTkwNDAsImV4cCI6MjEwNTM3NTA0MH0.DEmUv30RaLUN10OAsFYXW49xJtXYmOOMUOgcQe-oy_w";
-const SUPABASE_PHOTOS_BUCKET = "job-uploads";
+const EDGE_FUNCTION_URL = "https://acdyletpjdmrqddylgcn.supabase.co/functions/v1/smart-responder";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFjZHlsZXRwamRtcnFkZHlsZ2NuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4MDA2NTUsImV4cCI6MjEwNTM3NjY1NX0.2JaoROSxmbbo1Dah-oiBqKULru1Gz8koL0wBlMJbEyI";
 
-const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-/* ---------- gsRun: kept as the app's call surface, now backed by a
- * Supabase RPC call instead of an Apps Script Web App fetch. Every
- * backend function from the old Code.gs has a matching Postgres
- * function (see supabase/schema.sql); this maps the old
- * gsRun('startJob', a, b, c) positional-args style onto the named
- * parameters Postgres RPC needs, so the rest of the app is unchanged. */
-const RPC_PARAMS = {
-  loginUser: ['p_username', 'p_password'],
-  changeOwnPassword: ['p_user_id', 'p_current_password', 'p_new_password'],
-  listBranches: [],
-  createBranch: ['p_code', 'p_name'],
-  updateBranchActive: ['p_id', 'p_active'],
-  deleteBranch: ['p_id'],
-  listSites: [],
-  createSite: ['p_code', 'p_name', 'p_address'],
-  updateSiteActive: ['p_id', 'p_active'],
-  deleteSite: ['p_id'],
-  listSiteFinancials: [],
-  listTechnicians: [],
-  createTechnician: ['p_name', 'p_username', 'p_password', 'p_role'],
-  updateTechnician: ['p_id', 'p_name', 'p_username', 'p_role', 'p_active'],
-  resetTechnicianPassword: ['p_id', 'p_new_password'],
-  deleteTechnician: ['p_id'],
-  startJob: ['p_technician_id', 'p_site_id', 'p_branch_id', 'p_lat', 'p_lng'],
-  reachSite: ['p_job_id', 'p_lat', 'p_lng'],
-  setJobStatus: ['p_job_id', 'p_status', 'p_actor_id'],
-  setActualDistance: ['p_job_id', 'p_km', 'p_actor_id'],
-  editJob: ['p_job_id', 'p_site_id', 'p_branch_id', 'p_technician_id', 'p_actor_id'],
-  listJobsForTechnician: ['p_technician_id'],
-  listAllJobs: [],
-  listJobHistory: ['p_job_id'],
-  getReportsData: ['p_from_date', 'p_to_date'],
-  uploadJobPhoto: ['p_job_id', 'p_file_url'],
-  listJobPhotos: ['p_job_id'],
-  addJobBill: ['p_job_id', 'p_amount', 'p_description', 'p_file_url'],
-  listJobBills: ['p_job_id'],
-  addJobFund: ['p_job_id', 'p_amount', 'p_note'],
-  listJobFunds: ['p_job_id']
-};
-function toSnakeCase_(name){ return name.replace(/[A-Z]/g, c => '_' + c.toLowerCase()); }
-
-async function gsRun(fnName, ...args){
-  const paramNames = RPC_PARAMS[fnName];
-  if(!paramNames) throw new Error('Unknown function: ' + fnName);
-  const params = {};
-  paramNames.forEach((name, i) => { params[name] = args[i] === undefined ? null : args[i]; });
-  const { data, error } = await supabaseClient.rpc(toSnakeCase_(fnName), params);
-  if(error) throw new Error(error.message || 'Request failed.');
-  return data;
+/* ---------- gsRun: calls the Supabase Edge Function backend over HTTP ----------
+ * Same { fn, args } contract the old Apps Script Web App used, so
+ * every gsRun(...) call elsewhere in this file is unchanged. Supabase
+ * Edge Functions require a valid apikey/Authorization header on every
+ * request (unlike the old Apps Script endpoint), which is what the
+ * anon key below is for — it authenticates the request to Supabase,
+ * it does not touch the database directly (the Edge Function uses its
+ * own service-role key for that; see supabase/functions/api). */
+function gsRun(fnName, ...args){
+  return fetch(EDGE_FUNCTION_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
+    },
+    body: JSON.stringify({ fn: fnName, args: args })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if(!data.ok) throw new Error(data.error || 'Request failed.');
+    return data.result;
+  });
 }
-
-// Uploads a photo/receipt blob to Supabase Storage and returns the
-// object path to store as file_url, replacing saveFileToJobFolder_().
-async function uploadToStorage_(jobId, base64Data, filename, mimeType){
-  const path = `${jobId}/${crypto.randomUUID()}-${filename}`;
-  const bytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-  const { error } = await supabaseClient.storage.from(SUPABASE_PHOTOS_BUCKET)
-    .upload(path, bytes, { contentType: mimeType, upsert: false });
-  if(error) throw new Error(error.message || 'Upload failed.');
-  return path;
-}
-
-// Replaces getFileDataUrl(): gets a short-lived signed URL for a
-// Storage object path instead of round-tripping the file as base64.
-async function getSignedUrl_(path){
-  const { data, error } = await supabaseClient.storage.from(SUPABASE_PHOTOS_BUCKET)
-    .createSignedUrl(path, 3600);
-  if(error) throw new Error(error.message || 'Could not load file.');
-  return data.signedUrl;
-}
-
-// Bill/job receipts are stored as Storage object paths (see
-// uploadToStorage_). Open a blank tab immediately (so popup blockers
-// don't catch it), then fill it in once the signed URL arrives.
+// Bill/job-photo receipts are Storage object paths; the Edge Function
+// downloads them and returns a data: URL, same contract as the old
+// getFileDataUrl(). Open a blank tab immediately (so popup blockers
+// don't catch it), then fill it in once the data arrives.
 async function openReceipt(path){
   const win = window.open('', '_blank');
   try{
-    const url = await getSignedUrl_(path);
-    if(win) win.document.write(`<title>Receipt</title><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="${url}" style="max-width:100%;max-height:100vh;" /></body>`);
+    const dataUrl = await gsRun('getFileDataUrl', path);
+    if(win) win.document.write(`<title>Receipt</title><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="${dataUrl}" style="max-width:100%;max-height:100vh;" /></body>`);
   } catch(e){
     if(win) win.document.write('Could not load receipt.');
   }
 }
 
-if(SUPABASE_URL.indexOf('YOUR-PROJECT-REF') !== -1 || SUPABASE_ANON_KEY.indexOf('PASTE_YOUR') !== -1){
+if(EDGE_FUNCTION_URL.indexOf('YOUR-PROJECT-REF') !== -1 || SUPABASE_ANON_KEY.indexOf('PASTE_YOUR') !== -1){
   document.getElementById('configBanner').classList.remove('hidden');
 }
 /* ---------- Dark mode ---------- */
@@ -797,9 +749,9 @@ async function loadModalPhotos(){
   try{
     const photos = await gsRun('listJobPhotos', modalJobId);
     if(!photos.length){ el.innerHTML = '<div class="sub fade-in">No photos uploaded.</div>'; return; }
-    // Photos are stored as Supabase Storage object paths — each one is
-    // resolved to a short-lived signed URL for display.
-    const dataUrls = await Promise.all(photos.map(p => getSignedUrl_(p.url).catch(() => null)));
+    // Photos are stored as Storage object paths — the Edge Function
+    // resolves each one to a data: URL.
+    const dataUrls = await Promise.all(photos.map(p => gsRun('getFileDataUrl', p.url).catch(() => null)));
     el.innerHTML = dataUrls.map(src => src ? `<img class="modal-thumb fade-in" src="${src}" alt="job photo" />` : '').join('');
   } catch(e){ el.innerHTML = '<div class="sub">Could not load photos.</div>'; }
 }
