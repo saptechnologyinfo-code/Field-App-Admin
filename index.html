@@ -68,6 +68,12 @@
   .pill-reached{background:var(--success-bg);color:var(--success);}
   .pill-completed{background:var(--grey-bg);color:var(--muted);}
   .pill-cancelled{background:var(--danger-bg);color:var(--danger);}
+  .pill-open{background:var(--grey-bg);color:var(--primary);}
+  .pill-in_progress{background:var(--selected-bg);color:var(--primary);}
+  .pill-approved{background:var(--success-bg);color:var(--success);}
+  .pill-pending{background:var(--warn-bg);color:var(--warn);}
+  .pill-rejected,.pill-used{background:var(--grey-bg);color:var(--muted);}
+  .tab-badge{display:inline-block;min-width:18px;padding:0 6px;margin-left:6px;border-radius:9px;background:var(--danger);color:#fff;font-size:.72rem;line-height:18px;text-align:center;}
   .pill-overdue{background:var(--danger-bg);color:var(--danger);margin-left:6px;}
   .report-stat{background:var(--grey-bg);border-radius:10px;padding:10px 16px;font-size:.85rem;}
   .report-stat b{display:block;font-size:1.2rem;margin-top:2px;}
@@ -127,6 +133,7 @@
 
     <div class="tabs">
       <button class="tab-btn active" data-tab="jobs">Jobs</button>
+      <button class="tab-btn" data-tab="permissions">Permissions<span class="tab-badge hidden" id="permBadge">0</span></button>
       <button class="tab-btn" data-tab="branches">Branches</button>
       <button class="tab-btn" data-tab="sites">Sites</button>
       <button class="tab-btn" data-tab="technicians">Technicians</button>
@@ -135,6 +142,17 @@
 
     <div id="tab-jobs" class="tab-panel">
       <div class="card">
+        <h2 style="font-size:1rem;margin-top:0;">Create job</h2>
+        <div class="form-inline">
+          <div><label>Branch</label><select id="newJobBranch"></select></div>
+          <div><label>Site</label><select id="newJobSite"></select></div>
+          <div><label>Notes (optional)</label><input id="newJobNotes" placeholder="e.g. Replace faulty switch" /></div>
+          <div style="max-width:140px;"><button class="btn" id="createJobBtn" style="width:100%;">Create job</button></div>
+        </div>
+        <div class="sub" style="color:var(--muted);font-size:.85rem;margin-top:6px;">New jobs appear as Open on every technician's phone. A technician assigns one to themselves.</div>
+        <div class="error" id="createJobError"></div>
+      </div>
+      <div class="card">
         <div class="row">
           <div><label>Filter by branch</label><select id="filterBranch"><option value="">All branches</option></select></div>
           <div><label>Filter by site</label><select id="filterSite"><option value="">All sites</option></select></div>
@@ -142,8 +160,10 @@
           <div><label>Filter by status</label>
             <select id="filterStatus">
               <option value="">All</option>
-              <option value="started">Started</option>
+              <option value="open">Open (unassigned)</option>
+              <option value="started">On the way</option>
               <option value="reached">Reached</option>
+              <option value="in_progress">In progress</option>
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
             </select>
@@ -164,6 +184,19 @@
           <tbody id="jobsTableBody"></tbody>
         </table>
         <div id="jobsEmpty" class="empty hidden">No jobs match this filter.</div>
+      </div>
+    </div>
+
+    <div id="tab-permissions" class="tab-panel hidden">
+      <div class="card">
+        <div class="sub" style="color:var(--muted);font-size:.9rem;">A technician asks here when a site already has an active job and they need to take another. Approving lets that technician take <b>one</b> more job at that site.</div>
+      </div>
+      <div class="card table-scroll">
+        <table>
+          <thead><tr><th>Requested</th><th>Technician</th><th>Site</th><th>Active job there</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+          <tbody id="permTableBody"></tbody>
+        </table>
+        <div id="permEmpty" class="empty hidden">No permission requests yet.</div>
       </div>
     </div>
 
@@ -189,15 +222,17 @@
           <div><label>Code (e.g. SAP14)</label><input id="newSiteCode" /></div>
           <div><label>Name (e.g. SAP 14)</label><input id="newSiteName" /></div>
           <div><label>Address (optional)</label><input id="newSiteAddress" /></div>
+          <div><label>Location (optional)</label><input id="newSiteCoords" placeholder="6.9271, 79.8612" /></div>
           <div style="max-width:140px;"><button class="btn" id="addSiteBtn" style="width:100%;">Add</button></div>
         </div>
+        <div class="sub" style="color:var(--muted);font-size:.85rem;margin-top:6px;">Location lets technicians' phones mark a job Reached automatically. In Google Maps, right-click the place and click the coordinates to copy them.</div>
         <div class="error" id="siteError"></div>
       </div>
       <div class="card" style="display:flex;justify-content:flex-end;padding:12px 20px;">
         <button class="btn btn-secondary" id="exportSitesBtn" style="width:auto;">Export site cash CSV</button>
       </div>
       <div class="card table-scroll">
-        <table><thead><tr><th>Code</th><th>Name</th><th>Address</th><th>Active</th><th>Funds given</th><th>Expenses</th><th>Balance</th><th></th></tr></thead><tbody id="sitesTableBody"></tbody></table>
+        <table><thead><tr><th>Code</th><th>Name</th><th>Address</th><th>Location</th><th>Active</th><th>Funds given</th><th>Expenses</th><th>Balance</th><th></th></tr></thead><tbody id="sitesTableBody"></tbody></table>
       </div>
     </div>
 
@@ -248,6 +283,12 @@
         <div style="max-width:110px;"><button class="btn btn-secondary" id="saveReassignBtn" style="width:100%;">Save</button></div>
       </div>
       <div class="error" id="reassignError"></div>
+    </div>
+
+    <div class="modal-section" id="cancelJobSection">
+      <h3>Job status</h3>
+      <button class="btn btn-danger" id="cancelJobBtn">Cancel this job</button>
+      <div class="error" id="cancelJobError"></div>
     </div>
 
     <div class="modal-section"><h3>Photos</h3><div id="modalPhotos"></div></div>
@@ -393,6 +434,16 @@ let lastJobsData = [];
 function getSession(){ const raw = sessionStorage.getItem('admin'); return raw ? JSON.parse(raw) : null; }
 function setSession(a){ sessionStorage.setItem('admin', JSON.stringify(a)); }
 function clearSession(){ sessionStorage.removeItem('admin'); }
+const STATUS_LABEL = { open:'OPEN', started:'ON THE WAY', reached:'REACHED', in_progress:'IN PROGRESS', completed:'COMPLETED', cancelled:'CANCELLED' };
+function statusLabel(st){ return STATUS_LABEL[st] || String(st).toUpperCase(); }
+function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function parseCoords(text){
+  const m = String(text || '').trim().match(/^(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)$/);
+  if(!m) return null;
+  const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+  if(lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
 function fmtTime(ts){ if(!ts) return '—'; return new Date(ts).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}); }
 
 loginBtn.addEventListener('click', async () => {
@@ -426,6 +477,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.remove('hidden');
+    if(btn.dataset.tab === 'permissions') loadPermissions();
     if(btn.dataset.tab === 'reports' && !document.getElementById('reportResults').innerHTML){
       loadReport();
     }
@@ -444,7 +496,32 @@ async function loadFilterOptions(){
 
   const branchSel = document.getElementById('filterBranch');
   branchSel.innerHTML = '<option value="">All branches</option>' + branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+
+  // Create-job form: active branches/sites only; keep the current choice.
+  const nb = document.getElementById('newJobBranch'), ns = document.getElementById('newJobSite');
+  const prevB = nb.value, prevS = ns.value;
+  nb.innerHTML = branches.filter(b => b.active).map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+  ns.innerHTML = sites.filter(s => s.active).map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  if(prevB) nb.value = prevB;
+  if(prevS) ns.value = prevS;
 }
+
+document.getElementById('createJobBtn').addEventListener('click', async () => {
+  const errEl = document.getElementById('createJobError');
+  errEl.textContent = '';
+  const branchId = document.getElementById('newJobBranch').value;
+  const siteId = document.getElementById('newJobSite').value;
+  if(!branchId){ errEl.textContent = 'Choose a branch.'; return; }
+  if(!siteId){ errEl.textContent = 'Choose a site.'; return; }
+  const btn = document.getElementById('createJobBtn');
+  btn.disabled = true;
+  try{
+    await gsRun('createJob', siteId, branchId, document.getElementById('newJobNotes').value.trim() || null, admin.id);
+    document.getElementById('newJobNotes').value = '';
+    await loadJobs();
+  } catch(e){ errEl.textContent = e.message || 'Could not create the job.'; }
+  finally{ btn.disabled = false; }
+});
 
 async function loadJobs(){
   const tbody = document.getElementById('jobsTableBody');
@@ -474,8 +551,8 @@ async function loadJobs(){
       <td><b>${r.job_number}</b></td>
       <td>${r.branch_name || '—'}</td>
       <td>${r.site_name}</td>
-      <td>${r.technician_name}</td>
-      <td><span class="pill pill-${r.status}">${r.status.toUpperCase()}</span>${r.overdue ? '<span class="pill pill-overdue">OVERDUE</span>' : ''}</td>
+      <td>${r.technician_name || '—'}</td>
+      <td><span class="pill pill-${r.status}">${statusLabel(r.status)}</span>${r.overdue ? '<span class="pill pill-overdue">OVERDUE</span>' : ''}</td>
       <td>${fmtTime(r.start_time)}</td>
       <td>${fmtTime(r.reach_time)}</td>
       <td>${r.gps_distance_km != null ? r.gps_distance_km.toFixed(2) + ' km' : '—'}</td>
@@ -573,7 +650,7 @@ window.deleteBranch = async (id) => {
 /* ---------- Sites ---------- */
 async function loadSitesTable(){
   const tbody = document.getElementById('sitesTableBody');
-  tbody.innerHTML = skeletonTableRows(8, 3);
+  tbody.innerHTML = skeletonTableRows(9, 3);
   const [sites, financials] = await Promise.all([gsRun('listSites'), gsRun('listSiteFinancials')]);
   window.siteFinancialsById = {};
   financials.forEach(f => window.siteFinancialsById[f.id] = f);
@@ -582,12 +659,15 @@ async function loadSitesTable(){
     const balCls = f.balance < 0 ? 'balance-neg' : 'balance-pos';
     return `
     <tr class="fade-in">
-      <td>${s.code}</td><td>${s.name}</td><td>${s.address || '—'}</td><td>${s.active ? 'Yes' : 'No'}</td>
+      <td>${s.code}</td><td>${s.name}</td><td>${s.address || '—'}</td>
+      <td>${s.lat != null ? Number(s.lat).toFixed(5) + ', ' + Number(s.lng).toFixed(5) : '<span style="color:var(--muted);">Not set</span>'}</td>
+      <td>${s.active ? 'Yes' : 'No'}</td>
       <td>Rs. ${f.total_funds.toFixed(2)}</td>
       <td>Rs. ${f.total_expenses.toFixed(2)}</td>
       <td class="${balCls}">Rs. ${f.balance.toFixed(2)}</td>
       <td class="actions-cell">
         <button class="btn btn-secondary" onclick="openSiteCashModal('${s.id}')">Cash</button>
+        <button class="btn btn-secondary" onclick="setSiteLocation('${s.id}', ${s.lat != null ? `'${s.lat}, ${s.lng}'` : "''"})">Location</button>
         <button class="btn btn-secondary" onclick="toggleSiteActive('${s.id}', ${!s.active})">${s.active ? 'Disable' : 'Enable'}</button>
         <button class="btn btn-danger" onclick="deleteSite('${s.id}')">Delete</button>
       </td>
@@ -623,23 +703,77 @@ document.getElementById('addSiteBtn').addEventListener('click', async () => {
   const code = document.getElementById('newSiteCode').value.trim();
   const name = document.getElementById('newSiteName').value.trim();
   const address = document.getElementById('newSiteAddress').value.trim();
+  const coordsText = document.getElementById('newSiteCoords').value.trim();
   const errEl = document.getElementById('siteError');
   errEl.textContent = '';
   if(!code || !name){ errEl.textContent = 'Code and name are required.'; return; }
+  let coords = null;
+  if(coordsText){
+    coords = parseCoords(coordsText);
+    if(!coords){ errEl.textContent = 'Location should look like 6.9271, 79.8612 (latitude, longitude).'; return; }
+  }
   try{
-    await gsRun('createSite', code, name, address || null);
+    await gsRun('createSite', code, name, address || null, coords ? coords.lat : null, coords ? coords.lng : null);
+    document.getElementById('newSiteCoords').value = '';
     document.getElementById('newSiteCode').value = '';
     document.getElementById('newSiteName').value = '';
     document.getElementById('newSiteAddress').value = '';
     await loadSitesTable(); await loadFilterOptions();
   } catch(e){ errEl.textContent = e.message; }
 });
+window.setSiteLocation = async (id, current) => {
+  const text = prompt('Site location as "latitude, longitude" (e.g. 6.9271, 79.8612).\nLeave empty to clear it.', current || '');
+  if(text === null) return;
+  let lat = null, lng = null;
+  if(text.trim() !== ''){
+    const c = parseCoords(text);
+    if(!c){ alert('That doesn\'t look like coordinates. Use: 6.9271, 79.8612'); return; }
+    lat = c.lat; lng = c.lng;
+  }
+  try{ await gsRun('updateSiteLocation', id, lat, lng); await loadSitesTable(); }
+  catch(e){ alert('Could not save: ' + e.message); }
+};
 window.toggleSiteActive = async (id, newState) => { await gsRun('updateSiteActive', id, newState); await loadSitesTable(); await loadFilterOptions(); };
 window.deleteSite = async (id) => {
   if(!confirm('Delete this site? Existing jobs referencing it will remain but this cannot be undone.')) return;
   try{ await gsRun('deleteSite', id); await loadSitesTable(); await loadFilterOptions(); }
   catch(e){ alert('Could not delete: ' + e.message); }
 };
+
+/* ---------- Permission requests ---------- */
+async function loadPermissions(){
+  const tbody = document.getElementById('permTableBody');
+  const empty = document.getElementById('permEmpty');
+  let rows;
+  try{ rows = await gsRun('listSitePermissions', null); }
+  catch(e){ empty.textContent = 'Could not load requests.'; empty.classList.remove('hidden'); return; }
+  const pending = rows.filter(r => r.status === 'pending').length;
+  const badge = document.getElementById('permBadge');
+  badge.textContent = pending;
+  badge.classList.toggle('hidden', pending === 0);
+  if(!rows.length){ tbody.innerHTML = ''; empty.textContent = 'No permission requests yet.'; empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+  // pending first, then by newest
+  rows.sort((a, b) => (b.status === 'pending') - (a.status === 'pending') || new Date(b.requested_at) - new Date(a.requested_at));
+  const label = { pending:'WAITING', approved:'APPROVED', rejected:'REJECTED', used:'USED' };
+  tbody.innerHTML = rows.map(r => `
+    <tr class="fade-in">
+      <td>${fmtTime(r.requested_at)}</td>
+      <td>${esc(r.technician_name)}</td>
+      <td>${esc(r.site_name)}</td>
+      <td>${r.active_job_number ? esc(r.active_job_number) : '<span style="color:var(--muted);">Site is free now</span>'}</td>
+      <td>${r.reason ? esc(r.reason) : '—'}</td>
+      <td><span class="pill pill-${r.status}">${label[r.status] || r.status}</span></td>
+      <td class="actions-cell">${r.status === 'pending' ? `
+        <button class="btn" onclick="decidePermission('${r.id}', true)">Approve</button>
+        <button class="btn btn-danger" onclick="decidePermission('${r.id}', false)">Reject</button>` : ''}</td>
+    </tr>`).join('');
+}
+window.decidePermission = async (id, approve) => {
+  try{ await gsRun('decideSitePermission', id, approve, admin.id); await loadPermissions(); }
+  catch(e){ alert('Could not save: ' + e.message); await loadPermissions(); }
+};
+setInterval(() => { if(admin && !document.hidden) loadPermissions(); }, 30000);
 
 /* ---------- Technicians ---------- */
 async function loadTechTable(){
@@ -704,6 +838,8 @@ window.openJobModalById = async (jobId) => {
   document.getElementById('modalFunds').innerHTML = skeletonLines(2);
   document.getElementById('modalHistory').innerHTML = skeletonLines(2);
   document.getElementById('reassignError').textContent = '';
+  document.getElementById('cancelJobError').textContent = '';
+  document.getElementById('cancelJobSection').classList.toggle('hidden', job.status === 'completed' || job.status === 'cancelled');
   await populateReassignSelects(job);
   jobModal.classList.remove('hidden');
   await loadModalPhotos(); await loadModalBills(); await loadModalFunds(); await loadModalHistory();
@@ -716,7 +852,7 @@ async function populateReassignSelects(job){
   const tSel = document.getElementById('editTechSelect');
   bSel.innerHTML = branches.map(b => `<option value="${b.id}" ${b.id === job.branch_id ? 'selected' : ''}>${b.name}</option>`).join('');
   sSel.innerHTML = sites.map(s => `<option value="${s.id}" ${s.id === job.site_id ? 'selected' : ''}>${s.name}</option>`).join('');
-  tSel.innerHTML = techs.map(t => `<option value="${t.id}" ${t.id === job.technician_id ? 'selected' : ''}>${t.name}</option>`).join('');
+  tSel.innerHTML = `<option value="" ${job.technician_id ? '' : 'selected'}>— Unassigned —</option>` + techs.map(t => `<option value="${t.id}" ${t.id === job.technician_id ? 'selected' : ''}>${t.name}</option>`).join('');
 }
 document.getElementById('saveReassignBtn').addEventListener('click', async () => {
   const errEl = document.getElementById('reassignError');
@@ -725,7 +861,7 @@ document.getElementById('saveReassignBtn').addEventListener('click', async () =>
     await gsRun('editJob', modalJobId,
       document.getElementById('editSiteSelect').value,
       document.getElementById('editBranchSelect').value,
-      document.getElementById('editTechSelect').value,
+      document.getElementById('editTechSelect').value || null,
       admin.id);
     await loadJobs();
     const refreshed = lastJobsData.find(j => j.id === modalJobId);
@@ -742,6 +878,16 @@ async function loadModalHistory(){
     `).join('') : '<div class="sub fade-in">No history recorded.</div>';
   } catch(e){ el.innerHTML = '<div class="sub">Could not load history.</div>'; }
 }
+document.getElementById('cancelJobBtn').addEventListener('click', async () => {
+  if(!confirm('Cancel this job? The technician will see it as cancelled.')) return;
+  const errEl = document.getElementById('cancelJobError');
+  errEl.textContent = '';
+  try{
+    await gsRun('setJobStatus', modalJobId, 'cancelled', admin.id);
+    await loadJobs();
+    jobModal.classList.add('hidden'); modalJobId = null;
+  } catch(e){ errEl.textContent = e.message || 'Could not cancel.'; }
+});
 document.getElementById('closeJobModal').addEventListener('click', () => { jobModal.classList.add('hidden'); modalJobId = null; });
 
 async function loadModalPhotos(){
@@ -803,18 +949,18 @@ async function loadReport(){
   try{ r = await gsRun('getReportsData', from || null, to || null); }
   catch(e){ el.innerHTML = '<div class="empty">Could not load report.</div>'; return; }
 
-  const statuses = ['started','reached','completed','cancelled'];
+  const statuses = ['open','started','reached','in_progress','completed','cancelled'];
   const statCards = `
     <div class="report-grid fade-in">
       <div class="report-stat">Total jobs<b>${r.total_jobs}</b></div>
-      <div class="report-stat">Overdue (still started, 3h+)<b>${r.overdue_count}</b></div>
+      <div class="report-stat">Overdue (on the way 3h+)<b>${r.overdue_count}</b></div>
       <div class="report-stat">Total bills<b>Rs. ${r.total_bills.toFixed(2)}</b></div>
       <div class="report-stat">Total funds given<b>Rs. ${r.total_funds.toFixed(2)}</b></div>
       <div class="report-stat">Avg GPS distance<b>${r.avg_gps_km != null ? r.avg_gps_km.toFixed(2) + ' km' : '—'}</b></div>
       <div class="report-stat">Avg actual distance<b>${r.avg_actual_km != null ? r.avg_actual_km.toFixed(2) + ' km' : '—'}</b></div>
     </div>
     <div class="report-grid fade-in">
-      ${statuses.map(s => `<div class="report-stat">${s.charAt(0).toUpperCase()+s.slice(1)}<b>${r.by_status[s] || 0}</b></div>`).join('')}
+      ${statuses.map(s => `<div class="report-stat">${({open:'Open',started:'On the way',reached:'Reached',in_progress:'In progress',completed:'Completed',cancelled:'Cancelled'})[s]}<b>${r.by_status[s] || 0}</b></div>`).join('')}
     </div>`;
 
   const branchRows = Object.keys(r.by_branch).map(name => {
@@ -848,6 +994,7 @@ async function enterApp(){
   await loadBranchesTable();
   await loadSitesTable();
   await loadTechTable();
+  loadPermissions();
 }
 
 (function init(){
