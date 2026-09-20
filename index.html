@@ -74,6 +74,9 @@
   .pill-pending{background:var(--warn-bg);color:var(--warn);}
   .pill-rejected,.pill-used{background:var(--grey-bg);color:var(--muted);}
   .tab-badge{display:inline-block;min-width:18px;padding:0 6px;margin-left:6px;border-radius:9px;background:var(--danger);color:#fff;font-size:.72rem;line-height:18px;text-align:center;}
+  .pill-lead{background:var(--selected-bg);color:var(--primary);}
+  .pill-joined{background:var(--success-bg);color:var(--success);}
+  .pill-invited,.pill-requested{background:var(--warn-bg);color:var(--warn);}
   .pill-overdue{background:var(--danger-bg);color:var(--danger);margin-left:6px;}
   .report-stat{background:var(--grey-bg);border-radius:10px;padding:10px 16px;font-size:.85rem;}
   .report-stat b{display:block;font-size:1.2rem;margin-top:2px;}
@@ -176,7 +179,7 @@
         <table>
           <thead>
             <tr>
-              <th>Job #</th><th>Branch</th><th>Site</th><th>Technician</th><th>Status</th>
+              <th>Job #</th><th>Branch</th><th>Site</th><th>Technician / team</th><th>Status</th>
               <th>Started</th><th>Reached</th><th>GPS dist.</th><th>Actual dist.</th>
               <th>Bills</th><th>Funds</th><th></th>
             </tr>
@@ -279,10 +282,30 @@
       <div class="form-inline">
         <div><label>Branch</label><select id="editBranchSelect"></select></div>
         <div><label>Site</label><select id="editSiteSelect"></select></div>
-        <div><label>Technician</label><select id="editTechSelect"></select></div>
+        <div><label>Lead technician</label><select id="editTechSelect"></select></div>
         <div style="max-width:110px;"><button class="btn btn-secondary" id="saveReassignBtn" style="width:100%;">Save</button></div>
       </div>
       <div class="error" id="reassignError"></div>
+    </div>
+
+    <div class="modal-section" id="teamSection">
+      <h3>Team</h3>
+      <div id="modalTeam"></div>
+      <div class="form-inline hidden" id="addMemberRow" style="margin-top:10px;">
+        <div><label>Add a technician to the team</label><select id="addMemberSelect"></select></div>
+        <div style="max-width:110px;"><button class="btn btn-secondary" id="addMemberBtn" style="width:100%;">Add</button></div>
+      </div>
+      <div class="error" id="teamError"></div>
+    </div>
+
+    <div class="modal-section" id="tripSection">
+      <h3>Travel (used for salary)</h3>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Technician</th><th>Started</th><th>Reached</th><th>Time</th><th>GPS km</th><th>Actual km</th><th></th></tr></thead>
+        <tbody id="modalTrips"></tbody>
+      </table></div>
+      <div class="sub" id="modalTripsEmpty" style="color:var(--muted);font-size:.85rem;">No trips yet.</div>
+      <div class="error" id="tripError"></div>
     </div>
 
     <div class="modal-section" id="cancelJobSection">
@@ -435,6 +458,18 @@ function getSession(){ const raw = sessionStorage.getItem('admin'); return raw ?
 function setSession(a){ sessionStorage.setItem('admin', JSON.stringify(a)); }
 function clearSession(){ sessionStorage.removeItem('admin'); }
 const STATUS_LABEL = { open:'OPEN', started:'ON THE WAY', reached:'REACHED', in_progress:'IN PROGRESS', completed:'COMPLETED', cancelled:'CANCELLED' };
+function fmtHours(h){
+  h = Number(h) || 0;
+  const mins = Math.round(h * 60);
+  return Math.floor(mins / 60) + ' h ' + String(mins % 60).padStart(2, '0') + ' min';
+}
+function fmtMins(m){ return m == null ? '—' : fmtHours(m / 60); }
+function teamLabel(r){
+  const m = r.members || [];
+  if(!m.length) return esc(r.technician_name || '—');
+  return esc(r.technician_name) + ' <span style="color:var(--muted);">(lead)</span>, ' + m.map(x => esc(x.name)).join(', ');
+}
+function teamText(r){ return [r.technician_name].concat((r.members || []).map(m => m.name)).filter(Boolean).join('; '); }
 function statusLabel(st){ return STATUS_LABEL[st] || String(st).toUpperCase(); }
 function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function parseCoords(text){
@@ -540,7 +575,7 @@ async function loadJobs(){
   let rows = lastJobsData;
   if(branchFilter) rows = rows.filter(r => r.branch_id === branchFilter);
   if(siteFilter) rows = rows.filter(r => r.site_id === siteFilter);
-  if(techFilter) rows = rows.filter(r => r.technician_id === techFilter);
+  if(techFilter) rows = rows.filter(r => r.technician_id === techFilter || (r.members || []).some(m => m.id === techFilter));
   if(statusFilter) rows = rows.filter(r => r.status === statusFilter);
 
   if(rows.length === 0){ tbody.innerHTML=''; empty.classList.remove('hidden'); empty.textContent='No jobs match this filter.'; return; }
@@ -551,7 +586,7 @@ async function loadJobs(){
       <td><b>${r.job_number}</b></td>
       <td>${r.branch_name || '—'}</td>
       <td>${r.site_name}</td>
-      <td>${r.technician_name || '—'}</td>
+      <td>${teamLabel(r)}</td>
       <td><span class="pill pill-${r.status}">${statusLabel(r.status)}</span>${r.overdue ? '<span class="pill pill-overdue">OVERDUE</span>' : ''}</td>
       <td>${fmtTime(r.start_time)}</td>
       <td>${fmtTime(r.reach_time)}</td>
@@ -600,7 +635,7 @@ function downloadCsv(filename, rows){
 }
 document.getElementById('exportJobsBtn').addEventListener('click', () => {
   const header = ['Job #','Branch','Site','Technician','Status','Started','Reached','GPS km','Actual km','Bills (Rs)','Funds (Rs)','Overdue'];
-  const rows = lastJobsData.map(r => [r.job_number, r.branch_name, r.site_name, r.technician_name, r.status,
+  const rows = lastJobsData.map(r => [r.job_number, r.branch_name, r.site_name, teamText(r), r.status,
     fmtTime(r.start_time), fmtTime(r.reach_time), r.gps_distance_km, r.actual_distance_km,
     Number(r.total_bills || 0).toFixed(2), Number(r.total_funds || 0).toFixed(2), r.overdue ? 'Yes' : 'No']);
   downloadCsv('jobs-export.csv', [header, ...rows]);
@@ -832,7 +867,7 @@ window.openJobModalById = async (jobId) => {
   if(!job) return;
   modalJobId = job.id;
   document.getElementById('modalJobNumber').textContent = job.job_number;
-  document.getElementById('modalJobMeta').textContent = `${job.branch_name || '—'} · ${job.site_name} · ${job.technician_name}`;
+  document.getElementById('modalJobMeta').textContent = `${job.branch_name || '—'} · ${job.site_name} · ${teamText(job) || 'Unassigned'}`;
   document.getElementById('modalPhotos').innerHTML = skeletonThumbs(3);
   document.getElementById('modalBills').innerHTML = skeletonLines(2);
   document.getElementById('modalFunds').innerHTML = skeletonLines(2);
@@ -842,7 +877,7 @@ window.openJobModalById = async (jobId) => {
   document.getElementById('cancelJobSection').classList.toggle('hidden', job.status === 'completed' || job.status === 'cancelled');
   await populateReassignSelects(job);
   jobModal.classList.remove('hidden');
-  await loadModalPhotos(); await loadModalBills(); await loadModalFunds(); await loadModalHistory();
+  await loadModalPhotos(); await loadModalBills(); await loadModalFunds(); await loadModalHistory(); await loadModalTeam(); renderModalTrips();
 };
 
 async function populateReassignSelects(job){
@@ -865,9 +900,73 @@ document.getElementById('saveReassignBtn').addEventListener('click', async () =>
       admin.id);
     await loadJobs();
     const refreshed = lastJobsData.find(j => j.id === modalJobId);
-    if(refreshed) document.getElementById('modalJobMeta').textContent = `${refreshed.branch_name || '—'} · ${refreshed.site_name} · ${refreshed.technician_name}`;
+    if(refreshed) document.getElementById('modalJobMeta').textContent = `${refreshed.branch_name || '—'} · ${refreshed.site_name} · ${teamText(refreshed) || 'Unassigned'}`;
     await loadModalHistory();
   } catch(e){ errEl.textContent = e.message || 'Could not save.'; }
+});
+function renderModalTrips(){
+  const job = lastJobsData.find(j => j.id === modalJobId);
+  const trips = (job && job.trips) || [];
+  document.getElementById('modalTripsEmpty').classList.toggle('hidden', trips.length > 0);
+  document.getElementById('modalTrips').innerHTML = trips.map(t => `
+    <tr>
+      <td>${esc(t.name)} <span style="color:var(--muted);font-size:.78rem;">${t.role === 'lead' ? '(lead)' : ''}</span></td>
+      <td>${fmtTime(t.start_time)}</td>
+      <td>${t.reach_time ? fmtTime(t.reach_time) : '<span style="color:var(--muted);">Not yet</span>'}</td>
+      <td>${fmtMins(t.travel_minutes)}</td>
+      <td>${t.distance_km != null ? Number(t.distance_km).toFixed(2) : '—'}</td>
+      <td><input type="number" step="0.1" min="0" id="tripKm_${t.technician_id}" value="${t.actual_distance_km != null ? t.actual_distance_km : ''}" style="width:80px;" /></td>
+      <td><button class="btn btn-secondary" style="padding:5px 8px;font-size:.78rem;" onclick="saveTripKm('${t.technician_id}')">Save</button></td>
+    </tr>`).join('');
+}
+window.saveTripKm = async (techId) => {
+  const errEl = document.getElementById('tripError');
+  errEl.textContent = '';
+  const val = document.getElementById('tripKm_' + techId).value.trim();
+  let km = null;
+  if(val !== ''){
+    km = parseFloat(val);
+    if(isNaN(km) || km < 0){ errEl.textContent = 'Enter a valid distance in km (or leave empty to use GPS).'; return; }
+  }
+  try{
+    await gsRun('setTripDistance', modalJobId, techId, km, admin.id);
+    await loadJobs(); renderModalTrips(); await loadModalHistory();
+  } catch(e){ errEl.textContent = e.message || 'Could not save.'; }
+};
+const ACTIVE = ['started','reached','in_progress'];
+async function loadModalTeam(){
+  const el = document.getElementById('modalTeam');
+  const addRow = document.getElementById('addMemberRow');
+  const job = lastJobsData.find(j => j.id === modalJobId);
+  document.getElementById('teamError').textContent = '';
+  try{
+    const [rows, techs] = await Promise.all([gsRun('listJobTeam', modalJobId), gsRun('listTechnicians')]);
+    const active = !!job && ACTIVE.includes(job.status);
+    const label = { lead:'LEAD', joined:'TEAM', invited:'INVITED', requested:'ASKED TO JOIN' };
+    el.innerHTML = rows.length ? rows.map(m => `
+      <div class="modal-fund-row fade-in">
+        <span>${esc(m.name)} <span class="pill pill-${m.status}">${label[m.status] || m.status}</span></span>
+        <span>${active && m.status !== 'lead' ? `<button class="btn btn-secondary" style="padding:5px 8px;font-size:.78rem;" onclick="removeMember('${m.technician_id}')">${m.status === 'joined' ? 'Remove' : 'Dismiss'}</button>` : ''}</span>
+      </div>`).join('') : '<div class="sub fade-in">No technician on this job yet.</div>';
+
+    const inTeam = new Set(rows.filter(m => m.status === 'lead' || m.status === 'joined').map(m => m.technician_id));
+    const options = techs.filter(t => t.active && t.role === 'technician' && !inTeam.has(t.id));
+    document.getElementById('addMemberSelect').innerHTML = options.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    addRow.classList.toggle('hidden', !(active && options.length));
+  } catch(e){ el.innerHTML = '<div class="sub">Could not load the team.</div>'; addRow.classList.add('hidden'); }
+}
+window.removeMember = async (techId) => {
+  if(!confirm('Remove this person from the job team?')) return;
+  try{ await gsRun('removeJobMember', modalJobId, techId, admin.id); await loadModalTeam(); await loadJobs(); await loadModalHistory(); }
+  catch(e){ document.getElementById('teamError').textContent = e.message || 'Could not remove.'; }
+};
+document.getElementById('addMemberBtn').addEventListener('click', async () => {
+  const techId = document.getElementById('addMemberSelect').value;
+  const errEl = document.getElementById('teamError');
+  errEl.textContent = '';
+  if(!techId) return;
+  try{ await gsRun('addJobMember', modalJobId, techId, admin.id); await loadModalTeam(); await loadJobs(); await loadModalHistory(); }
+  catch(e){ errEl.textContent = e.message || 'Could not add.'; }
 });
 async function loadModalHistory(){
   const el = document.getElementById('modalHistory');
@@ -970,8 +1069,12 @@ async function loadReport(){
 
   const techRows = Object.keys(r.by_technician).map(name => {
     const t = r.by_technician[name];
-    return `<tr><td>${name}</td><td>${t.jobs}</td><td>${t.completed}</td><td>${t.cancelled}</td><td>Rs. ${t.bills.toFixed(2)}</td></tr>`;
-  }).join('') || '<tr><td colspan="5" class="empty">No data.</td></tr>';
+    return `<tr><td>${esc(name)}</td>
+      <td>${t.jobs} <span style="color:var(--muted);font-size:.8rem;">(${t.as_lead} lead · ${t.as_member} member)</span></td>
+      <td>${t.completed}</td><td>${t.cancelled}</td>
+      <td>${t.trips_done}</td><td>${Number(t.distance_km).toFixed(2)}</td><td>${fmtHours(t.travel_hours)}</td>
+      <td>Rs. ${Number(t.bills).toFixed(2)}</td></tr>`;
+  }).join('') || '<tr><td colspan="8" class="empty">No data.</td></tr>';
 
   el.innerHTML = statCards + `
     <div class="card table-scroll fade-in">
@@ -980,7 +1083,8 @@ async function loadReport(){
     </div>
     <div class="card table-scroll fade-in">
       <h3 style="margin-top:0;font-size:.9rem;color:var(--muted);">By technician</h3>
-      <table><thead><tr><th>Technician</th><th>Jobs</th><th>Completed</th><th>Cancelled</th><th>Bills</th></tr></thead><tbody>${techRows}</tbody></table>
+      <table><thead><tr><th>Technician</th><th>Jobs</th><th>Completed</th><th>Cancelled</th><th>Trips reached</th><th>Distance (km)</th><th>Travel time</th><th>Bills (as lead)</th></tr></thead><tbody>${techRows}</tbody></table>
+      <div style="color:var(--muted);font-size:.82rem;margin-top:8px;">Every person on a job is counted, lead and members. Distance uses the manual figure when one was entered, otherwise GPS. Bills are counted once, for the lead.</div>
     </div>`;
 }
 
