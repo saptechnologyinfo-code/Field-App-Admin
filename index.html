@@ -140,6 +140,7 @@
       <button class="tab-btn" data-tab="branches">Branches</button>
       <button class="tab-btn" data-tab="sites">Sites</button>
       <button class="tab-btn" data-tab="technicians">Technicians</button>
+      <button class="tab-btn" data-tab="salary">Salary</button>
       <button class="tab-btn" data-tab="reports">Reports</button>
     </div>
 
@@ -253,6 +254,50 @@
       </div>
       <div class="card table-scroll">
         <table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Active</th><th></th></tr></thead><tbody id="techTableBody"></tbody></table>
+      </div>
+    </div>
+
+    <div id="tab-salary" class="tab-panel hidden">
+      <div class="card">
+        <h2 style="font-size:1rem;margin-top:0;">Daily salary &amp; transport update</h2>
+        <div class="form-inline">
+          <div><label>Technician</label><select id="sTech"></select></div>
+          <div><label>Date</label><input id="sDate" type="date" /></div>
+          <div><label>Attendance</label>
+            <select id="sAtt"><option value="present">Present</option><option value="half_day">Half day</option><option value="absent">Absent</option><option value="leave">Leave</option></select></div>
+        </div>
+        <div class="form-inline">
+          <div><label>Salary earned (Rs.)</label><input id="sSalDue" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+          <div><label>Salary paid (Rs.)</label><input id="sSalPaid" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+          <div><label>Transport earned (Rs.)</label><input id="sTrDue" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+          <div><label>Transport paid (Rs.)</label><input id="sTrPaid" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+        </div>
+        <div class="form-inline">
+          <div style="flex:3;"><label>Note (optional)</label><input id="sNote" /></div>
+          <div style="max-width:140px;"><button class="btn" id="sSaveBtn" style="width:100%;">Save entry</button></div>
+          <div style="max-width:100px;"><button class="btn btn-secondary hidden" id="sCancelEditBtn" style="width:100%;">Cancel</button></div>
+        </div>
+        <div style="color:var(--muted);font-size:.8rem;">Earned = what the technician is owed for that day. Paid = what you actually handed over. The difference builds up as arrears. Saving again for the same technician and date replaces that day's entry.</div>
+        <div class="error" id="sError"></div>
+      </div>
+
+      <div class="card table-scroll">
+        <h3 style="margin-top:0;font-size:.9rem;color:var(--muted);">Arrears by technician (all time)</h3>
+        <table><thead><tr><th>Technician</th><th>Salary earned</th><th>Salary paid</th><th>Salary arrears</th><th>Transport arrears</th><th>Total arrears</th></tr></thead><tbody id="sBalances"></tbody></table>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div><label>Technician</label><select id="sfTech"></select></div>
+          <div><label>From date</label><input id="sfFrom" type="date" /></div>
+          <div><label>To date</label><input id="sfTo" type="date" /></div>
+          <div style="max-width:140px;"><button class="btn" id="sfRunBtn" style="width:100%;">Show</button></div>
+        </div>
+      </div>
+      <div id="sChartCard" class="card hidden"><h3 style="margin-top:0;font-size:.9rem;color:var(--muted);">Salary &amp; transport paid, with arrears</h3><div id="sChart"></div></div>
+      <div id="sSummary"></div>
+      <div class="card table-scroll">
+        <table><thead><tr><th>Date</th><th>Technician</th><th>Attendance</th><th>Salary earned</th><th>Salary paid</th><th>Transport earned</th><th>Transport paid</th><th>Note</th><th></th></tr></thead><tbody id="sEntries"></tbody></table>
       </div>
     </div>
 
@@ -513,6 +558,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.remove('hidden');
     if(btn.dataset.tab === 'permissions') loadPermissions();
+    if(btn.dataset.tab === 'salary') initSalaryTab();
     if(btn.dataset.tab === 'reports' && !document.getElementById('reportResults').innerHTML){
       loadReport();
     }
@@ -1086,6 +1132,196 @@ async function loadReport(){
       <table><thead><tr><th>Technician</th><th>Jobs</th><th>Completed</th><th>Cancelled</th><th>Trips reached</th><th>Distance (km)</th><th>Travel time</th><th>Bills (as lead)</th></tr></thead><tbody>${techRows}</tbody></table>
       <div style="color:var(--muted);font-size:.82rem;margin-top:8px;">Every person on a job is counted, lead and members. Distance uses the manual figure when one was entered, otherwise GPS. Bills are counted once, for the lead.</div>
     </div>`;
+}
+
+/* ---------- Salary helpers (shared chart + formatting) ---------- */
+const SAL_ATT = { present:'Present', half_day:'Half day', absent:'Absent', leave:'Leave' };
+function salRs(n){ return 'Rs. ' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+function salYmd(d){ const p = n => String(n).padStart(2,'0'); return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()); }
+function salFmtDate(s){ return new Date(s + 'T00:00:00').toLocaleDateString([], { weekday:'short', day:'numeric', month:'short', year:'numeric' }); }
+function salCompact(v){ const a = Math.abs(v); if(a >= 1e6) return (v/1e6).toFixed(1) + 'M'; if(a >= 1000) return (v/1000).toFixed(a % 1000 ? 1 : 0) + 'k'; return String(Math.round(v)); }
+
+/* Adds a running arrears figure to each entry (ascending order in, same order out). */
+function salWithRunning(entries, opening){
+  let sRun = Number(opening && opening.salary_arrears || 0), tRun = Number(opening && opening.transport_arrears || 0);
+  return entries.map(e => {
+    sRun += Number(e.salary_due) - Number(e.salary_paid);
+    tRun += Number(e.transport_due) - Number(e.transport_paid);
+    return Object.assign({}, e, { run_salary: sRun, run_transport: tRun, run_total: sRun + tRun });
+  });
+}
+
+/* Groups entries into day / week / month buckets depending on how long the period is. */
+function salBuckets(runEntries){
+  if(!runEntries.length) return [];
+  const first = new Date(runEntries[0].entry_date + 'T00:00:00');
+  const last = new Date(runEntries[runEntries.length-1].entry_date + 'T00:00:00');
+  const span = (last - first) / 864e5;
+  const mode = span <= 31 ? 'day' : span <= 150 ? 'week' : 'month';
+  const map = new Map();
+  runEntries.forEach(e => {
+    const d = new Date(e.entry_date + 'T00:00:00');
+    let key, label;
+    if(mode === 'day'){ key = e.entry_date; label = d.toLocaleDateString([], { day:'numeric', month:'short' }); }
+    else if(mode === 'week'){ const m = new Date(d); m.setDate(m.getDate() - ((m.getDay() + 6) % 7)); key = salYmd(m); label = 'Wk ' + m.toLocaleDateString([], { day:'numeric', month:'short' }); }
+    else { key = e.entry_date.slice(0,7); label = d.toLocaleDateString([], { month:'short', year:'2-digit' }); }
+    let b = map.get(key);
+    if(!b){ b = { label, salary:0, transport:0, arrears:0 }; map.set(key, b); }
+    b.salary += Number(e.salary_paid); b.transport += Number(e.transport_paid);
+    b.arrears = e.run_total;
+  });
+  return Array.from(map.values());
+}
+
+/* Inline SVG: bars = salary paid / transport paid, line = running arrears. Theme-aware via CSS vars. */
+function salChartHtml(runEntries){
+  const b = salBuckets(runEntries);
+  if(!b.length) return '<div class="empty-note" style="text-align:center;padding:24px 0;">No salary updates in this period.</div>';
+  const W = 640, H = 250, L = 50, R = 12, T = 14, B = 34;
+  const vals = []; b.forEach(x => vals.push(x.salary, x.transport, x.arrears));
+  let max = Math.max(0, ...vals), min = Math.min(0, ...vals);
+  if(max === min) max = min + 1;
+  const ph = H - T - B, pw = W - L - R;
+  const y = v => T + ph * (1 - (v - min) / (max - min));
+  const step = pw / b.length, bw = Math.max(3, Math.min(18, step * 0.32));
+  let g = '';
+  for(let i = 0; i <= 4; i++){
+    const v = min + (max - min) * i / 4, yy = y(v);
+    g += `<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" style="stroke:var(--border)" stroke-width="1"/>` +
+         `<text x="${L-6}" y="${yy+3}" text-anchor="end" font-size="10" style="fill:var(--muted)">${salCompact(v)}</text>`;
+  }
+  const every = Math.ceil(b.length / 9);
+  let bars = '', pts = [], dots = '', labels = '';
+  b.forEach((x, i) => {
+    const cx = L + step * (i + .5), y0 = y(0);
+    const bar = (v, dx, color) => { const yy = y(v); return `<rect x="${dx}" y="${Math.min(yy,y0)}" width="${bw}" height="${Math.max(1, Math.abs(y0-yy))}" rx="2" style="fill:var(${color})"/>`; };
+    bars += bar(x.salary, cx - bw - 1, '--primary') + bar(x.transport, cx + 1, '--success');
+    pts.push(cx + ',' + y(x.arrears));
+    dots += `<circle cx="${cx}" cy="${y(x.arrears)}" r="3" style="fill:var(--warn)"><title>${x.label}: arrears ${salRs(x.arrears)}</title></circle>`;
+    if(i % every === 0) labels += `<text x="${cx}" y="${H-12}" text-anchor="middle" font-size="10" style="fill:var(--muted)">${x.label}</text>`;
+  });
+  const line = pts.length > 1 ? `<polyline points="${pts.join(' ')}" fill="none" stroke-width="2.2" stroke-linejoin="round" style="stroke:var(--warn)"/>` : '';
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" role="img" aria-label="Salary and transport paid with running arrears">${g}${bars}${line}${dots}${labels}</svg>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:.78rem;color:var(--muted);margin-top:8px;">
+      <span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--primary);margin-right:5px;"></i>Salary paid</span>
+      <span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--success);margin-right:5px;"></i>Transport paid</span>
+      <span><i style="display:inline-block;width:14px;height:3px;border-radius:2px;background:var(--warn);margin-right:5px;vertical-align:middle;"></i>Arrears (running)</span>
+    </div>`;
+}
+
+/* ---------- Salary & attendance ---------- */
+let salaryInited = false, salaryTechs = [], salaryCache = [];
+
+async function initSalaryTab(){
+  if(!salaryInited){
+    try{
+      salaryTechs = (await gsRun('listTechnicians')).filter(t => t.active);
+    }catch(e){ document.getElementById('sError').textContent = 'Could not load technicians: ' + e.message; return; }
+    const opts = salaryTechs.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    document.getElementById('sTech').innerHTML = opts;
+    document.getElementById('sfTech').innerHTML = '<option value="">All technicians</option>' + opts;
+    const now = new Date();
+    document.getElementById('sDate').value = salYmd(now);
+    document.getElementById('sfFrom').value = salYmd(new Date(now.getFullYear(), now.getMonth(), 1));
+    document.getElementById('sfTo').value = salYmd(now);
+    salaryInited = true;
+  }
+  loadSalary();
+}
+
+function resetSalaryForm(){
+  ['sSalDue','sSalPaid','sTrDue','sTrPaid','sNote'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('sAtt').value = 'present';
+  document.getElementById('sSaveBtn').textContent = 'Save entry';
+  document.getElementById('sCancelEditBtn').classList.add('hidden');
+}
+
+document.getElementById('sSaveBtn').addEventListener('click', async () => {
+  const err = document.getElementById('sError'); err.textContent = '';
+  const num = id => { const v = document.getElementById(id).value; return v === '' ? 0 : Number(v); };
+  const tech = document.getElementById('sTech').value, date = document.getElementById('sDate').value;
+  const vals = [num('sSalDue'), num('sTrDue'), num('sSalPaid'), num('sTrPaid')];
+  if(!tech || !date){ err.textContent = 'Choose a technician and a date.'; return; }
+  if(vals.some(v => isNaN(v) || v < 0)){ err.textContent = 'Amounts must be zero or more.'; return; }
+  const btn = document.getElementById('sSaveBtn'); btn.disabled = true;
+  try{
+    await gsRun('upsertSalaryEntry', tech, date, document.getElementById('sAtt').value,
+      vals[0], vals[1], vals[2], vals[3], document.getElementById('sNote').value.trim() || null, admin.id);
+    resetSalaryForm();
+    await loadSalary();
+  }catch(e){ err.textContent = e.message || 'Could not save.'; }
+  btn.disabled = false;
+});
+document.getElementById('sCancelEditBtn').addEventListener('click', resetSalaryForm);
+document.getElementById('sfRunBtn').addEventListener('click', loadSalary);
+document.getElementById('sfTech').addEventListener('change', loadSalary);
+
+async function loadSalary(){
+  const tech = document.getElementById('sfTech').value || null;
+  const from = document.getElementById('sfFrom').value || null;
+  const to = document.getElementById('sfTo').value || null;
+  const body = document.getElementById('sEntries');
+  body.innerHTML = '<tr><td colspan="9">' + skeletonLines(3) + '</td></tr>';
+  try{
+    const [entries, balances, report] = await Promise.all([
+      gsRun('listSalaryEntries', tech, from, to),
+      gsRun('listSalaryBalances'),
+      tech ? gsRun('getSalaryReport', tech, from, to) : Promise.resolve(null)
+    ]);
+    salaryCache = entries;
+
+    document.getElementById('sBalances').innerHTML = balances.map(b => {
+      const tot = Number(b.salary_arrears) + Number(b.transport_arrears);
+      return `<tr class="fade-in"><td>${esc(b.name)}</td><td>${salRs(b.salary_due)}</td><td>${salRs(b.salary_paid)}</td>
+        <td>${salRs(b.salary_arrears)}</td><td>${salRs(b.transport_arrears)}</td>
+        <td><b class="${tot > 0 ? 'balance-neg' : 'balance-pos'}">${salRs(tot)}</b></td></tr>`;
+    }).join('') || '<tr><td colspan="6" class="empty">No technicians.</td></tr>';
+
+    const chartCard = document.getElementById('sChartCard');
+    if(report){
+      chartCard.classList.remove('hidden');
+      document.getElementById('sChart').innerHTML = salChartHtml(salWithRunning(report.entries, report.opening));
+    } else chartCard.classList.add('hidden');
+
+    const sum = k => entries.reduce((a, e) => a + Number(e[k]), 0);
+    const arrears = (sum('salary_due') + sum('transport_due')) - (sum('salary_paid') + sum('transport_paid'));
+    document.getElementById('sSummary').innerHTML = `<div class="report-grid fade-in">
+      <div class="report-stat">Salary earned<b>${salRs(sum('salary_due'))}</b></div>
+      <div class="report-stat">Salary paid<b>${salRs(sum('salary_paid'))}</b></div>
+      <div class="report-stat">Transport earned<b>${salRs(sum('transport_due'))}</b></div>
+      <div class="report-stat">Transport paid<b>${salRs(sum('transport_paid'))}</b></div>
+      <div class="report-stat">Arrears this period<b class="${arrears > 0 ? 'balance-neg' : 'balance-pos'}">${salRs(arrears)}</b></div></div>`;
+
+    body.innerHTML = entries.map(e => `<tr class="fade-in">
+      <td>${salFmtDate(e.entry_date)}</td><td>${esc(e.technician_name)}</td><td>${SAL_ATT[e.attendance] || esc(e.attendance)}</td>
+      <td>${salRs(e.salary_due)}</td><td>${salRs(e.salary_paid)}</td><td>${salRs(e.transport_due)}</td><td>${salRs(e.transport_paid)}</td>
+      <td style="white-space:normal;max-width:200px;">${esc(e.note || '')}</td>
+      <td class="actions-cell"><button class="btn btn-secondary" onclick="editSalaryEntry('${e.id}')">Edit</button>
+        <button class="btn btn-danger" onclick="deleteSalaryEntry('${e.id}')">Delete</button></td></tr>`).join('')
+      || '<tr><td colspan="9" class="empty">No entries for this selection.</td></tr>';
+  }catch(e){
+    body.innerHTML = '<tr><td colspan="9" class="empty">Could not load: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function editSalaryEntry(id){
+  const e = salaryCache.find(x => x.id === id); if(!e) return;
+  document.getElementById('sTech').value = e.technician_id;
+  document.getElementById('sDate').value = e.entry_date;
+  document.getElementById('sAtt').value = e.attendance;
+  document.getElementById('sSalDue').value = e.salary_due;
+  document.getElementById('sSalPaid').value = e.salary_paid;
+  document.getElementById('sTrDue').value = e.transport_due;
+  document.getElementById('sTrPaid').value = e.transport_paid;
+  document.getElementById('sNote').value = e.note || '';
+  document.getElementById('sSaveBtn').textContent = 'Update entry';
+  document.getElementById('sCancelEditBtn').classList.remove('hidden');
+  document.getElementById('tab-salary').scrollIntoView({ behavior:'smooth' });
+}
+async function deleteSalaryEntry(id){
+  if(!confirm('Delete this day\'s entry?')) return;
+  try{ await gsRun('deleteSalaryEntry', id, admin.id); await loadSalary(); }
+  catch(e){ alert('Could not delete: ' + e.message); }
 }
 
 /* ---------- Boot ---------- */
