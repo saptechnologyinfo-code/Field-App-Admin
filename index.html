@@ -265,6 +265,8 @@
           <div><label>Date</label><input id="sDate" type="date" /></div>
           <div><label>Attendance</label>
             <select id="sAtt"><option value="present">Present</option><option value="half_day">Half day</option><option value="absent">Absent</option><option value="leave">Leave</option></select></div>
+          <div><label>Time in (optional)</label><input id="sTimeIn" type="time" /></div>
+          <div><label>Time out (optional)</label><input id="sTimeOut" type="time" /></div>
         </div>
         <div class="form-inline">
           <div><label>Salary earned (Rs.)</label><input id="sSalDue" type="number" min="0" step="0.01" placeholder="0.00" /></div>
@@ -297,7 +299,7 @@
       <div id="sChartCard" class="card hidden"><h3 style="margin-top:0;font-size:.9rem;color:var(--muted);">Salary &amp; transport paid, with arrears</h3><div id="sChart"></div></div>
       <div id="sSummary"></div>
       <div class="card table-scroll">
-        <table><thead><tr><th>Date</th><th>Technician</th><th>Attendance</th><th>Salary earned</th><th>Salary paid</th><th>Transport earned</th><th>Transport paid</th><th>Note</th><th></th></tr></thead><tbody id="sEntries"></tbody></table>
+        <table><thead><tr><th>Date</th><th>Technician</th><th>Attendance</th><th>In / Out</th><th>Salary earned</th><th>Salary paid</th><th>Transport earned</th><th>Transport paid</th><th>Note</th><th></th></tr></thead><tbody id="sEntries"></tbody></table>
       </div>
     </div>
 
@@ -1141,6 +1143,26 @@ function salYmd(d){ const p = n => String(n).padStart(2,'0'); return d.getFullYe
 function salFmtDate(s){ return new Date(s + 'T00:00:00').toLocaleDateString([], { weekday:'short', day:'numeric', month:'short', year:'numeric' }); }
 function salCompact(v){ const a = Math.abs(v); if(a >= 1e6) return (v/1e6).toFixed(1) + 'M'; if(a >= 1000) return (v/1000).toFixed(a % 1000 ? 1 : 0) + 'k'; return String(Math.round(v)); }
 
+/* Optional in/out times ("HH:MM" strings). Out earlier than In = overnight shift. */
+function salHours(tin, tout){
+  if(!tin || !tout) return null;
+  const a = tin.split(':').map(Number), b = tout.split(':').map(Number);
+  let m = (b[0]*60 + b[1]) - (a[0]*60 + a[1]); if(m < 0) m += 1440;
+  return m;
+}
+function salHoursText(m){ return m == null ? '' : Math.floor(m/60) + 'h ' + String(m % 60).padStart(2,'0') + 'm'; }
+function salTimesText(e){
+  if(!e.time_in && !e.time_out) return '';
+  const m = salHours(e.time_in, e.time_out);
+  return 'In ' + (e.time_in || '—') + ' · Out ' + (e.time_out || '—') + (m != null ? ' (' + salHoursText(m) + ')' : '');
+}
+
+function salTimesCell(e){
+  if(!e.time_in && !e.time_out) return '<span style="color:var(--muted);">—</span>';
+  const m = salHours(e.time_in, e.time_out);
+  return (e.time_in || '—') + ' – ' + (e.time_out || '—') + (m != null ? '<br><small style="color:var(--muted);">' + salHoursText(m) + '</small>' : '');
+}
+
 /* Adds a running arrears figure to each entry (ascending order in, same order out). */
 function salWithRunning(entries, opening){
   let sRun = Number(opening && opening.salary_arrears || 0), tRun = Number(opening && opening.transport_arrears || 0);
@@ -1230,7 +1252,7 @@ async function initSalaryTab(){
 }
 
 function resetSalaryForm(){
-  ['sSalDue','sSalPaid','sTrDue','sTrPaid','sNote'].forEach(id => document.getElementById(id).value = '');
+  ['sSalDue','sSalPaid','sTrDue','sTrPaid','sNote','sTimeIn','sTimeOut'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('sAtt').value = 'present';
   document.getElementById('sSaveBtn').textContent = 'Save entry';
   document.getElementById('sCancelEditBtn').classList.add('hidden');
@@ -1243,10 +1265,12 @@ document.getElementById('sSaveBtn').addEventListener('click', async () => {
   const vals = [num('sSalDue'), num('sTrDue'), num('sSalPaid'), num('sTrPaid')];
   if(!tech || !date){ err.textContent = 'Choose a technician and a date.'; return; }
   if(vals.some(v => isNaN(v) || v < 0)){ err.textContent = 'Amounts must be zero or more.'; return; }
+  const tIn = document.getElementById('sTimeIn').value || null, tOut = document.getElementById('sTimeOut').value || null;
+  if(tIn && tOut && tOut < tIn && !confirm('Time out (' + tOut + ') is earlier than time in (' + tIn + '). Count this as an overnight shift?')) return;
   const btn = document.getElementById('sSaveBtn'); btn.disabled = true;
   try{
     await gsRun('upsertSalaryEntry', tech, date, document.getElementById('sAtt').value,
-      vals[0], vals[1], vals[2], vals[3], document.getElementById('sNote').value.trim() || null, admin.id);
+      vals[0], vals[1], vals[2], vals[3], document.getElementById('sNote').value.trim() || null, admin.id, tIn, tOut);
     resetSalaryForm();
     await loadSalary();
   }catch(e){ err.textContent = e.message || 'Could not save.'; }
@@ -1261,7 +1285,7 @@ async function loadSalary(){
   const from = document.getElementById('sfFrom').value || null;
   const to = document.getElementById('sfTo').value || null;
   const body = document.getElementById('sEntries');
-  body.innerHTML = '<tr><td colspan="9">' + skeletonLines(3) + '</td></tr>';
+  body.innerHTML = '<tr><td colspan="10">' + skeletonLines(3) + '</td></tr>';
   try{
     const [entries, balances, report] = await Promise.all([
       gsRun('listSalaryEntries', tech, from, to),
@@ -1293,14 +1317,14 @@ async function loadSalary(){
       <div class="report-stat">Arrears this period<b class="${arrears > 0 ? 'balance-neg' : 'balance-pos'}">${salRs(arrears)}</b></div></div>`;
 
     body.innerHTML = entries.map(e => `<tr class="fade-in">
-      <td>${salFmtDate(e.entry_date)}</td><td>${esc(e.technician_name)}</td><td>${SAL_ATT[e.attendance] || esc(e.attendance)}</td>
+      <td>${salFmtDate(e.entry_date)}</td><td>${esc(e.technician_name)}</td><td>${SAL_ATT[e.attendance] || esc(e.attendance)}</td><td>${salTimesCell(e)}</td>
       <td>${salRs(e.salary_due)}</td><td>${salRs(e.salary_paid)}</td><td>${salRs(e.transport_due)}</td><td>${salRs(e.transport_paid)}</td>
       <td style="white-space:normal;max-width:200px;">${esc(e.note || '')}</td>
       <td class="actions-cell"><button class="btn btn-secondary" onclick="editSalaryEntry('${e.id}')">Edit</button>
         <button class="btn btn-danger" onclick="deleteSalaryEntry('${e.id}')">Delete</button></td></tr>`).join('')
-      || '<tr><td colspan="9" class="empty">No entries for this selection.</td></tr>';
+      || '<tr><td colspan="10" class="empty">No entries for this selection.</td></tr>';
   }catch(e){
-    body.innerHTML = '<tr><td colspan="9" class="empty">Could not load: ' + esc(e.message) + '</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="empty">Could not load: ' + esc(e.message) + '</td></tr>';
   }
 }
 
@@ -1314,6 +1338,8 @@ function editSalaryEntry(id){
   document.getElementById('sTrDue').value = e.transport_due;
   document.getElementById('sTrPaid').value = e.transport_paid;
   document.getElementById('sNote').value = e.note || '';
+  document.getElementById('sTimeIn').value = e.time_in || '';
+  document.getElementById('sTimeOut').value = e.time_out || '';
   document.getElementById('sSaveBtn').textContent = 'Update entry';
   document.getElementById('sCancelEditBtn').classList.remove('hidden');
   document.getElementById('tab-salary').scrollIntoView({ behavior:'smooth' });
