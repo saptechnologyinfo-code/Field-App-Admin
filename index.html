@@ -300,6 +300,26 @@
         <table><thead><tr><th>Technician</th><th>Salary earned</th><th>Salary paid</th><th>Salary arrears</th><th>Transport arrears</th><th>Total arrears</th></tr></thead><tbody id="sBalances"></tbody></table>
       </div>
 
+      <div class="card" id="dlCard">
+        <h2 style="font-size:1rem;margin-top:0;">Download salary &amp; transport report</h2>
+        <div class="form-inline">
+          <div><label>From date</label><input id="dlFrom" type="date" /></div>
+          <div><label>To date</label><input id="dlTo" type="date" /></div>
+        </div>
+        <label>Technicians</label>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:8px 12px;background:var(--input-bg);">
+          <label style="display:flex;gap:8px;align-items:center;margin:4px 0;font-weight:700;color:var(--text);cursor:pointer;"><input type="checkbox" id="dlAll" checked style="width:auto;" /> All technicians</label>
+          <div id="dlTechList" style="display:flex;flex-wrap:wrap;gap:4px 18px;"></div>
+        </div>
+        <div class="form-inline" style="margin-top:12px;">
+          <div style="flex:0 0 auto;min-width:0;"><button class="btn" id="dlSummaryBtn">Summary (CSV)</button></div>
+          <div style="flex:0 0 auto;min-width:0;"><button class="btn btn-secondary" id="dlDetailBtn">Daily details (CSV)</button></div>
+          <div style="flex:0 0 auto;min-width:0;"><button class="btn btn-secondary" id="dlPrintBtn">Print / Save as PDF</button></div>
+        </div>
+        <div style="color:var(--muted);font-size:.8rem;">Summary = one row per technician (attendance, work hours, salary &amp; transport earned / paid, arrears). Daily details = one row per day with in/out times and work hours. Leave dates blank for all records.</div>
+        <div class="error" id="dlError"></div>
+      </div>
+
       <div class="card">
         <div class="row">
           <div><label>Technician</label><select id="sfTech"></select></div>
@@ -1300,6 +1320,9 @@ async function initSalaryTab(){
     document.getElementById('sDate').value = salYmd(now);
     document.getElementById('sfFrom').value = salYmd(new Date(now.getFullYear(), now.getMonth(), 1));
     document.getElementById('sfTo').value = salYmd(now);
+    document.getElementById('dlFrom').value = salYmd(new Date(now.getFullYear(), now.getMonth(), 1));
+    document.getElementById('dlTo').value = salYmd(now);
+    renderDlTechs();
     salaryInited = true;
   }
   try{ salaryEtf = new Set(await gsRun('listEtfMembers')); }catch(e){}
@@ -1427,6 +1450,103 @@ async function deleteSalaryEntry(id){
   catch(e){ alert('Could not delete: ' + e.message); }
 }
 
+
+
+/* ---------- Download report: summary + daily details (all or selected technicians) ---------- */
+function renderDlTechs(){
+  document.getElementById('dlTechList').innerHTML = salaryTechs.map(t =>
+    `<label style="display:flex;gap:6px;align-items:center;margin:4px 0;color:var(--text);cursor:pointer;"><input type="checkbox" class="dl-tech" value="${t.id}" style="width:auto;" /> ${esc(t.name)}</label>`).join('');
+}
+document.getElementById('dlAll').addEventListener('change', e => {
+  if(e.target.checked) document.querySelectorAll('.dl-tech').forEach(c => c.checked = false);
+});
+document.getElementById('dlTechList').addEventListener('change', () => {
+  const any = [...document.querySelectorAll('.dl-tech')].some(c => c.checked);
+  document.getElementById('dlAll').checked = !any;
+});
+
+async function buildDownloadData(){
+  const err = document.getElementById('dlError'); err.textContent = '';
+  const from = document.getElementById('dlFrom').value || null;
+  const to = document.getElementById('dlTo').value || null;
+  if(from && to && from > to){ err.textContent = 'From date is after To date.'; return null; }
+  const picked = new Set([...document.querySelectorAll('.dl-tech:checked')].map(c => c.value));
+  const techs = salaryTechs.filter(t => !picked.size || picked.has(t.id));
+  if(!techs.length){ err.textContent = 'No technicians available.'; return null; }
+  let entries, opening = [];
+  try{
+    entries = await gsRun('listSalaryEntries', null, from, to);
+    if(from) opening = await gsRun('listSalaryBalances', from);
+  }catch(e){ err.textContent = 'Could not load data: ' + e.message; return null; }
+  const ids = new Set(techs.map(t => t.id));
+  entries = entries.filter(e => ids.has(e.technician_id))
+    .sort((a, b) => String(a.entry_date).localeCompare(String(b.entry_date)) || String(a.technician_name).localeCompare(String(b.technician_name)));
+  const openMap = new Map(opening.map(b => [b.id, b]));
+  const num = v => Number(v || 0);
+  const rows = techs.map(t => {
+    const es = entries.filter(e => e.technician_id === t.id);
+    const sum = k => es.reduce((a, e) => a + num(e[k]), 0);
+    const cnt = a => es.filter(e => e.attendance === a).length;
+    const mins = es.reduce((a, e) => a + (salHours(e.time_in, e.time_out) || 0), 0);
+    const o = openMap.get(t.id) || {};
+    const openSal = num(o.salary_arrears), openTr = num(o.transport_arrears);
+    const settled = sum('arrears_salary_paid') + sum('arrears_transport_paid');
+    return { name:t.name, etf: salaryEtf.has(t.id), present:cnt('present'), half:cnt('half_day'), absent:cnt('absent'), leave:cnt('leave'),
+      mins, salDue:sum('salary_due'), salPaid:sum('salary_paid'), trDue:sum('transport_due'), trPaid:sum('transport_paid'),
+      etfDed:sum('etf_deduction'), settled, openTotal:openSal + openTr,
+      closeTotal:openSal + openTr + sum('salary_due') + sum('transport_due') - sum('salary_paid') - sum('transport_paid') - settled };
+  });
+  return { from, to, rows, entries };
+}
+
+function dlCsvFile(name, lines){
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const blob = new Blob(['\ufeff' + lines.map(r => r.map(q).join(',')).join('\r\n')], { type:'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function dlRange(d){ return (d.from || 'start') + '_to_' + (d.to || 'today'); }
+const dlMoney = n => Number(n || 0).toFixed(2);
+
+const DL_SUM_HEAD = ['Technician','ETF member','Present','Half day','Absent','Leave','Total work time','Salary earned','Salary paid','Transport earned','Transport paid','ETF deducted','Arrears settled','Arrears before period','Outstanding arrears'];
+function dlSumRow(r){ return [r.name, r.etf ? 'Yes' : 'No', r.present, r.half, r.absent, r.leave, r.mins ? salHoursText(r.mins) : '',
+  dlMoney(r.salDue), dlMoney(r.salPaid), dlMoney(r.trDue), dlMoney(r.trPaid), dlMoney(r.etfDed), dlMoney(r.settled), dlMoney(r.openTotal), dlMoney(r.closeTotal)]; }
+function dlTotals(rows){
+  const s = k => rows.reduce((a, r) => a + r[k], 0);
+  return ['TOTAL','', s('present'), s('half'), s('absent'), s('leave'), s('mins') ? salHoursText(s('mins')) : '',
+    dlMoney(s('salDue')), dlMoney(s('salPaid')), dlMoney(s('trDue')), dlMoney(s('trPaid')), dlMoney(s('etfDed')), dlMoney(s('settled')), dlMoney(s('openTotal')), dlMoney(s('closeTotal'))];
+}
+const DL_DET_HEAD = ['Date','Technician','Attendance','Time in','Time out','Work time','Salary earned','Salary paid','Transport earned','Transport paid','ETF deducted','Salary arrears settled','Transport arrears settled','Arrears day','Note'];
+function dlDetRow(e){ const m = salHours(e.time_in, e.time_out);
+  return [e.entry_date, e.technician_name, SAL_ATT[e.attendance] || e.attendance, e.time_in || '', e.time_out || '', m != null ? salHoursText(m) : '',
+    dlMoney(e.salary_due), dlMoney(e.salary_paid), dlMoney(e.transport_due), dlMoney(e.transport_paid), dlMoney(e.etf_deduction),
+    dlMoney(e.arrears_salary_paid), dlMoney(e.arrears_transport_paid), e.arrears_day || '', e.note || '']; }
+
+document.getElementById('dlSummaryBtn').addEventListener('click', async () => {
+  const d = await buildDownloadData(); if(!d) return;
+  dlCsvFile('salary_summary_' + dlRange(d) + '.csv', [DL_SUM_HEAD, ...d.rows.map(dlSumRow), dlTotals(d.rows)]);
+});
+document.getElementById('dlDetailBtn').addEventListener('click', async () => {
+  const d = await buildDownloadData(); if(!d) return;
+  if(!d.entries.length){ document.getElementById('dlError').textContent = 'No daily entries for this selection.'; return; }
+  dlCsvFile('salary_daily_details_' + dlRange(d) + '.csv', [DL_DET_HEAD, ...d.entries.map(dlDetRow)]);
+});
+document.getElementById('dlPrintBtn').addEventListener('click', async () => {
+  const d = await buildDownloadData(); if(!d) return;
+  const w = window.open('', '_blank');
+  if(!w){ document.getElementById('dlError').textContent = 'Pop-up blocked. Allow pop-ups to print / save as PDF.'; return; }
+  const tbl = (head, rows, boldLast) => '<table><thead><tr>' + head.map(h => `<th>${esc(h)}</th>`).join('') + '</tr></thead><tbody>' +
+    rows.map((r, i) => `<tr${boldLast && i === rows.length - 1 ? ' class="tot"' : ''}>` + r.map(c => `<td>${esc(c)}</td>`).join('') + '</tr>').join('') + '</tbody></table>';
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Salary & transport report</title><style>
+    body{font-family:Arial,sans-serif;font-size:11px;margin:18px;color:#111;} h1{font-size:16px;margin:0 0 4px;} h2{font-size:13px;margin:18px 0 6px;}
+    table{border-collapse:collapse;width:100%;} th,td{border:1px solid #bbb;padding:4px 6px;text-align:left;} th{background:#eee;} tr.tot td{font-weight:700;background:#f5f5f5;}
+    @page{size:A4 landscape;margin:10mm;}</style></head><body>
+    <h1>Salary &amp; transport report</h1><div>Period: ${esc(d.from || 'start')} to ${esc(d.to || 'today')} · Technicians: ${d.rows.length}</div>
+    <h2>Summary</h2>${tbl(DL_SUM_HEAD, [...d.rows.map(dlSumRow), dlTotals(d.rows)], true)}
+    <h2>Daily details</h2>${d.entries.length ? tbl(DL_DET_HEAD, d.entries.map(dlDetRow), false) : '<div>No daily entries.</div>'}
+    </body></html>`);
+  w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
+});
 
 /* ---------- Salary / transport / ETF analysis (Reports tab) ---------- */
 let anInited = false, anData = null;
