@@ -250,12 +250,13 @@
           <div><label>Role</label><select id="newTechRole"><option value="technician">Technician</option><option value="admin">Admin</option></select></div>
           <div><label>Designation</label><input id="newTechDesig" placeholder="e.g. Senior Technician" /></div>
           <div><label>Employee No</label><input id="newTechEmpNo" placeholder="e.g. EMP-014" /></div>
+          <div><label>Photo (optional)</label><input id="newTechPhoto" type="file" accept="image/*" /></div>
           <div style="max-width:140px;"><button class="btn" id="addTechBtn" style="width:100%;">Add</button></div>
         </div>
         <div class="error" id="techError"></div>
       </div>
       <div class="card table-scroll">
-        <table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Designation</th><th>Employee No</th><th>Active</th><th>Permanent (ETF)</th><th></th></tr></thead><tbody id="techTableBody"></tbody></table>
+        <table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Photo</th><th>Designation</th><th>Employee No</th><th>Active</th><th>Permanent (ETF)</th><th></th></tr></thead><tbody id="techTableBody"></tbody></table>
       </div>
     </div>
 
@@ -927,13 +928,18 @@ window.saveTechProfile = async (id) => {
 };
 async function loadTechTable(){
   const tbody = document.getElementById('techTableBody');
-  tbody.innerHTML = skeletonTableRows(8, 3);
+  tbody.innerHTML = skeletonTableRows(9, 3);
   const [data, etfIds] = await Promise.all([gsRun('listTechnicians'), gsRun('listEtfMembers').catch(() => [])]);
   const etfSet = new Set(etfIds);
   techListCache = data;
   document.getElementById('techTableBody').innerHTML = data.map(t => `
     <tr class="fade-in">
       <td>${t.name}</td><td>${t.username}</td><td>${t.role}</td>
+      <td style="min-width:150px;"><div style="display:flex;gap:6px;align-items:center;">
+        <img id="ph_${esc(t.id)}" alt="" style="width:44px;height:44px;border-radius:8px;object-fit:cover;background:var(--border);flex:none;" />
+        <div><input type="file" accept="image/*" id="phf_${esc(t.id)}" class="hidden" onchange="uploadTechPhoto('${t.id}', this)" />
+        <button class="btn btn-secondary" style="font-size:.75rem;padding:4px 8px;" onclick="document.getElementById('phf_${esc(t.id)}').click()">${t.photo_path ? 'Change' : 'Add photo'}</button>
+        ${t.photo_path ? `<button class="btn btn-danger" style="font-size:.75rem;padding:4px 8px;" onclick="removeTechPhoto('${t.id}')">✕</button>` : ''}</div></div></td>
       <td style="min-width:170px;"><input id="dsg_${esc(t.id)}" value="${esc(t.designation || '')}" placeholder="${t.role === 'admin' ? 'Admin' : 'Technician'}" /></td>
       <td style="min-width:130px;"><input id="emp_${esc(t.id)}" value="${esc(t.employee_no || '')}" placeholder="Employee No" /></td>
       <td>${t.active ? 'Yes' : 'No'}</td>
@@ -947,7 +953,22 @@ async function loadTechTable(){
       </td>
     </tr>
   `).join('');
+  data.forEach(t => { if(t.photo_path) gsRun('getFileDataUrl', t.photo_path).then(u => { const im = document.getElementById('ph_' + t.id); if(im) im.src = u; }).catch(() => {}); });
 }
+/* Photo: centre-cropped to a square (slightly biased to the top so faces stay in), 480x480 JPEG */
+function photoToBase64(file){ return new Promise((res, rej) => { const url = URL.createObjectURL(file), im = new Image();
+  im.onload = () => { const s = Math.min(im.width, im.height), cv = document.createElement('canvas'); cv.width = cv.height = 480;
+    cv.getContext('2d').drawImage(im, (im.width - s) / 2, (im.height - s) * 0.2, s, s, 0, 0, 480, 480); URL.revokeObjectURL(url); res(cv.toDataURL('image/jpeg', .85).split(',')[1]); };
+  im.onerror = () => rej(new Error('That file is not a valid image.')); im.src = url; }); }
+window.uploadTechPhoto = async (id, input) => {
+  const f = input.files[0]; if(!f) return;
+  try{ await gsRun('setTechnicianPhoto', id, await photoToBase64(f), 'image/jpeg'); await loadTechTable(); }
+  catch(e){ alert('Could not save photo: ' + e.message); }
+};
+window.removeTechPhoto = async (id) => {
+  if(!confirm('Remove this photo?')) return;
+  try{ await gsRun('setTechnicianPhoto', id, '', ''); await loadTechTable(); }catch(e){ alert('Could not remove photo: ' + e.message); }
+};
 async function toggleEtfMember(id, value){
   const msg = value ? 'Mark this technician as a PERMANENT member? ETF can then be deducted from their salary.'
                     : 'Remove ETF membership? You will no longer be able to deduct ETF for this technician (existing entries are kept).';
@@ -968,11 +989,14 @@ document.getElementById('addTechBtn').addEventListener('click', async () => {
   if(employeeNo && empNoTaken(employeeNo, '')){ errEl.textContent = 'Employee No "' + employeeNo + '" is already used by another person.'; return; }
   try{
     await gsRun('createTechnician', name, username, password, role);
-    if(designation || employeeNo){
+    const photoFile = document.getElementById('newTechPhoto').files[0];
+    if(designation || employeeNo || photoFile){
       const fresh = await gsRun('listTechnicians');
       const me = fresh.find(t => String(t.username).toLowerCase() === username.toLowerCase());
-      if(me) await gsRun('setTechnicianProfile', me.id, designation, employeeNo);
+      if(me && (designation || employeeNo)) await gsRun('setTechnicianProfile', me.id, designation, employeeNo);
+      if(me && photoFile) await gsRun('setTechnicianPhoto', me.id, await photoToBase64(photoFile), 'image/jpeg');
     }
+    document.getElementById('newTechPhoto').value = '';
     document.getElementById('newTechDesig').value = '';
     document.getElementById('newTechEmpNo').value = '';
     document.getElementById('newTechName').value = '';
