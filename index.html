@@ -248,12 +248,14 @@
           <div><label>Username</label><input id="newTechUsername" /></div>
           <div><label>Password</label><input id="newTechPassword" type="text" /></div>
           <div><label>Role</label><select id="newTechRole"><option value="technician">Technician</option><option value="admin">Admin</option></select></div>
+          <div><label>Designation</label><input id="newTechDesig" placeholder="e.g. Senior Technician" /></div>
+          <div><label>Employee No</label><input id="newTechEmpNo" placeholder="e.g. EMP-014" /></div>
           <div style="max-width:140px;"><button class="btn" id="addTechBtn" style="width:100%;">Add</button></div>
         </div>
         <div class="error" id="techError"></div>
       </div>
       <div class="card table-scroll">
-        <table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Active</th><th>Permanent (ETF)</th><th></th></tr></thead><tbody id="techTableBody"></tbody></table>
+        <table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Designation</th><th>Employee No</th><th>Active</th><th>Permanent (ETF)</th><th></th></tr></thead><tbody id="techTableBody"></tbody></table>
       </div>
     </div>
 
@@ -909,16 +911,35 @@ window.decidePermission = async (id, approve) => {
 setInterval(() => { if(admin && !document.hidden) loadPermissions(); }, 30000);
 
 /* ---------- Technicians ---------- */
+let techListCache = [];
+/* Designation + Employee No are saved per login (separate from the login ROLE: technician/admin).
+ * The salary & attendance QR cards read these same two values. */
+function empNoTaken(empNo, exceptId){
+  const k = empNo.toLowerCase();
+  return techListCache.some(t => String(t.id) !== String(exceptId) && String(t.employee_no || '').trim().toLowerCase() === k);
+}
+window.saveTechProfile = async (id) => {
+  const designation = document.getElementById('dsg_' + id).value.trim();
+  const employeeNo = document.getElementById('emp_' + id).value.trim();
+  if(employeeNo && empNoTaken(employeeNo, id)){ alert('Employee No "' + employeeNo + '" is already used by another person.'); return; }
+  try{ await gsRun('setTechnicianProfile', id, designation, employeeNo); await loadTechTable(); }
+  catch(e){ alert('Could not save details: ' + e.message + '\n\n(If this says the function is unknown, the backend still needs the setTechnicianProfile update.)'); }
+};
 async function loadTechTable(){
   const tbody = document.getElementById('techTableBody');
-  tbody.innerHTML = skeletonTableRows(6, 3);
+  tbody.innerHTML = skeletonTableRows(8, 3);
   const [data, etfIds] = await Promise.all([gsRun('listTechnicians'), gsRun('listEtfMembers').catch(() => [])]);
   const etfSet = new Set(etfIds);
+  techListCache = data;
   document.getElementById('techTableBody').innerHTML = data.map(t => `
     <tr class="fade-in">
-      <td>${t.name}</td><td>${t.username}</td><td>${t.role}</td><td>${t.active ? 'Yes' : 'No'}</td>
+      <td>${t.name}</td><td>${t.username}</td><td>${t.role}</td>
+      <td style="min-width:170px;"><input id="dsg_${esc(t.id)}" value="${esc(t.designation || '')}" placeholder="${t.role === 'admin' ? 'Admin' : 'Technician'}" /></td>
+      <td style="min-width:130px;"><input id="emp_${esc(t.id)}" value="${esc(t.employee_no || '')}" placeholder="Employee No" /></td>
+      <td>${t.active ? 'Yes' : 'No'}</td>
       <td>${etfSet.has(t.id) ? '<b style="color:#7c3aed;">✔ Permanent</b>' : '—'}</td>
       <td class="actions-cell">
+        <button class="btn" onclick="saveTechProfile('${t.id}')">Save details</button>
         <button class="btn btn-secondary" onclick="toggleEtfMember('${t.id}', ${!etfSet.has(t.id)})">${etfSet.has(t.id) ? 'Remove ETF' : 'Mark permanent (ETF)'}</button>
         <button class="btn btn-secondary" onclick="resetPassword('${t.id}')">Reset password</button>
         <button class="btn btn-secondary" onclick="toggleTechActive('${t.id}', ${!t.active}, '${t.name.replace(/'/g,"\\'")}', '${t.username}', '${t.role}')">${t.active ? 'Disable' : 'Enable'}</button>
@@ -939,11 +960,21 @@ document.getElementById('addTechBtn').addEventListener('click', async () => {
   const username = document.getElementById('newTechUsername').value.trim();
   const password = document.getElementById('newTechPassword').value;
   const role = document.getElementById('newTechRole').value;
+  const designation = document.getElementById('newTechDesig').value.trim();
+  const employeeNo = document.getElementById('newTechEmpNo').value.trim();
   const errEl = document.getElementById('techError');
   errEl.textContent = '';
   if(!name || !username || !password){ errEl.textContent = 'Name, username and password are required.'; return; }
+  if(employeeNo && empNoTaken(employeeNo, '')){ errEl.textContent = 'Employee No "' + employeeNo + '" is already used by another person.'; return; }
   try{
     await gsRun('createTechnician', name, username, password, role);
+    if(designation || employeeNo){
+      const fresh = await gsRun('listTechnicians');
+      const me = fresh.find(t => String(t.username).toLowerCase() === username.toLowerCase());
+      if(me) await gsRun('setTechnicianProfile', me.id, designation, employeeNo);
+    }
+    document.getElementById('newTechDesig').value = '';
+    document.getElementById('newTechEmpNo').value = '';
     document.getElementById('newTechName').value = '';
     document.getElementById('newTechUsername').value = '';
     document.getElementById('newTechPassword').value = '';
